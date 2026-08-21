@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "controle_estoque",
+  "project_id": "d8ebbadf-c211-435a-8c5b-52bf6d413169"
+}
