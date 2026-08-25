@@ -19,7 +19,9 @@ PRODUTOS_CSV = os.path.join(DATA_DIR, "produtos.csv")
 ENTRADAS_CSV = os.path.join(DATA_DIR, "entradas_estoque.csv")
 SAIDAS_CSV = os.path.join(DATA_DIR, "saidas_estoque.csv")
 
-PRODUTOS_HEADERS = ["codigo_barras", "nome", "peso_gramas", "e_caixa", "quantidade_pacotes"]
+PRODUTOS_HEADERS = [
+    "codigo_barras", "nome", "peso_gramas", "e_caixa", "quantidade_pacotes", "produto_relacionado",
+]
 ENTRADAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade"]
 SAIDAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade", "cliente", "data_entrega"]
 
@@ -31,8 +33,26 @@ def _ensure_csv(path, headers):
             csv.writer(f).writerow(headers)
 
 
+def _migrar_produtos_csv():
+    """Adiciona colunas novas a um produtos.csv de uma versão anterior, preservando os dados."""
+    if not os.path.exists(PRODUTOS_CSV):
+        return
+    with open(PRODUTOS_CSV, newline="", encoding="utf-8") as f:
+        header = next(csv.reader(f), None)
+    if header == PRODUTOS_HEADERS:
+        return
+    with open(PRODUTOS_CSV, newline="", encoding="utf-8") as f:
+        linhas = list(csv.DictReader(f, restval=""))
+    with open(PRODUTOS_CSV, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=PRODUTOS_HEADERS)
+        writer.writeheader()
+        for linha in linhas:
+            writer.writerow({campo: linha.get(campo, "") for campo in PRODUTOS_HEADERS})
+
+
 def ensure_files():
     _ensure_csv(PRODUTOS_CSV, PRODUTOS_HEADERS)
+    _migrar_produtos_csv()
     _ensure_csv(ENTRADAS_CSV, ENTRADAS_HEADERS)
     _ensure_csv(SAIDAS_CSV, SAIDAS_HEADERS)
 
@@ -50,7 +70,7 @@ def buscar_produto(codigo_barras):
     return None
 
 
-def adicionar_produto(codigo_barras, nome, peso_gramas, e_caixa, quantidade_pacotes):
+def adicionar_produto(codigo_barras, nome, peso_gramas, e_caixa, quantidade_pacotes, produto_relacionado=""):
     ensure_files()
     with open(PRODUTOS_CSV, "a", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow([
@@ -59,6 +79,7 @@ def adicionar_produto(codigo_barras, nome, peso_gramas, e_caixa, quantidade_paco
             peso_gramas,
             "sim" if e_caixa else "nao",
             quantidade_pacotes if e_caixa else "",
+            produto_relacionado if e_caixa else "",
         ])
 
 
@@ -72,6 +93,36 @@ def remover_produto(codigo_barras):
         writer.writeheader()
         writer.writerows(restantes)
     return True
+
+
+def resolver_leitura_estoque(codigo_barras):
+    """Resolve um código lido para o produto e a quantidade a aplicar no estoque.
+
+    Se o código for de uma caixa, resolve para o produto relacionado com a
+    quantidade de pacotes cadastrada na caixa (em vez da caixa em si).
+    Retorna None se o produto (ou o produto relacionado da caixa) não existir.
+    """
+    produto = buscar_produto(codigo_barras)
+    if not produto:
+        return None
+    if produto["e_caixa"] == "sim":
+        relacionado = buscar_produto(produto["produto_relacionado"])
+        if not relacionado:
+            return None
+        try:
+            quantidade = int(produto["quantidade_pacotes"])
+        except (TypeError, ValueError):
+            quantidade = 0
+        return {
+            "codigo_barras": relacionado["codigo_barras"],
+            "nome": relacionado["nome"],
+            "quantidade": quantidade,
+        }
+    return {
+        "codigo_barras": produto["codigo_barras"],
+        "nome": produto["nome"],
+        "quantidade": 1,
+    }
 
 
 def registrar_entrada(itens):

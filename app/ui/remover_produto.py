@@ -31,6 +31,7 @@ class RemoverProdutoFrame(tk.Frame):
             ("peso_gramas", "Peso (g)"),
             ("e_caixa", "É caixa"),
             ("quantidade_pacotes", "Qtd. pacotes"),
+            ("produto_relacionado", "Produto relacionado"),
         ]
         for i, (chave, rotulo) in enumerate(campos):
             tk.Label(self.info_frame, text=f"{rotulo}:").grid(row=i, column=0, sticky="e", pady=3)
@@ -71,6 +72,11 @@ class RemoverProdutoFrame(tk.Frame):
         self.info_labels["peso_gramas"].config(text=produto["peso_gramas"])
         self.info_labels["e_caixa"].config(text="Sim" if produto["e_caixa"] == "sim" else "Não")
         self.info_labels["quantidade_pacotes"].config(text=produto["quantidade_pacotes"] or "-")
+        relacionado_texto = "-"
+        if produto["e_caixa"] == "sim" and produto.get("produto_relacionado"):
+            relacionado = storage.buscar_produto(produto["produto_relacionado"])
+            relacionado_texto = relacionado["nome"] if relacionado else produto["produto_relacionado"]
+        self.info_labels["produto_relacionado"].config(text=relacionado_texto)
         self.info_frame.pack(pady=10)
         return "break"
 

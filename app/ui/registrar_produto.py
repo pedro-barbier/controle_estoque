@@ -9,6 +9,7 @@ class RegistrarProdutoFrame(tk.Frame):
         super().__init__(parent)
         self.controller = controller
         self.codigo_atual = None
+        self.relacionado_map = {}
 
         tk.Label(self, text="Registrar Produto", font=("TkDefaultFont", 16, "bold")).pack(pady=15)
 
@@ -55,8 +56,15 @@ class RegistrarProdutoFrame(tk.Frame):
         self.qtd_entry = tk.Entry(self.form_frame, textvariable=self.qtd_var, width=35, state="disabled")
         self.qtd_entry.grid(row=3, column=1, pady=5)
 
+        tk.Label(self.form_frame, text="Produto relacionado:").grid(row=4, column=0, sticky="e", pady=5)
+        self.relacionado_var = tk.StringVar()
+        self.relacionado_combo = ttk.Combobox(
+            self.form_frame, textvariable=self.relacionado_var, state="disabled", width=33, values=[],
+        )
+        self.relacionado_combo.grid(row=4, column=1, pady=5)
+
         btn_frame = tk.Frame(self.form_frame)
-        btn_frame.grid(row=4, column=0, columnspan=2, pady=15)
+        btn_frame.grid(row=5, column=0, columnspan=2, pady=15)
         tk.Button(btn_frame, text="Salvar", width=15, command=self.on_save).pack(side="left", padx=5)
         tk.Button(btn_frame, text="Cancelar", width=15, command=self.on_cancel).pack(side="left", padx=5)
 
@@ -75,15 +83,29 @@ class RegistrarProdutoFrame(tk.Frame):
         self.caixa_var.set("nao")
         self.qtd_var.set("")
         self.qtd_entry.config(state="disabled")
+        self.relacionado_var.set("")
+        self.relacionado_map = {}
+        self.relacionado_combo.config(values=[], state="disabled")
         self.status_label.config(text="", fg="red")
         self.form_frame.pack_forget()
 
     def on_caixa_change(self):
         if self.caixa_var.get() == "sim":
             self.qtd_entry.config(state="normal")
+            self._popular_produtos_relacionados()
+            self.relacionado_combo.config(state="readonly")
         else:
             self.qtd_var.set("")
             self.qtd_entry.config(state="disabled")
+            self.relacionado_var.set("")
+            self.relacionado_combo.config(values=[], state="disabled")
+
+    def _popular_produtos_relacionados(self):
+        produtos = [p for p in storage.listar_produtos() if p["e_caixa"] != "sim"]
+        self.relacionado_map = {
+            f"{p['nome']} ({p['codigo_barras']})": p["codigo_barras"] for p in produtos
+        }
+        self.relacionado_combo.config(values=list(self.relacionado_map.keys()))
 
     def on_barcode_submit(self, event=None):
         codigo = self.barcode_var.get().strip()
@@ -123,7 +145,21 @@ class RegistrarProdutoFrame(tk.Frame):
             messagebox.showwarning("Atenção", "Informe a quantidade de pacotes (número inteiro maior que zero).")
             return
 
-        storage.adicionar_produto(self.codigo_atual, nome, peso_val, e_caixa, qtd if e_caixa else "")
+        produto_relacionado = ""
+        if e_caixa:
+            relacionado_display = self.relacionado_var.get().strip()
+            produto_relacionado = self.relacionado_map.get(relacionado_display)
+            if not produto_relacionado:
+                messagebox.showwarning(
+                    "Atenção",
+                    "Selecione o produto relacionado à caixa (o produto que deve receber a "
+                    "quantidade quando a caixa for lida no estoque).",
+                )
+                return
+
+        storage.adicionar_produto(
+            self.codigo_atual, nome, peso_val, e_caixa, qtd if e_caixa else "", produto_relacionado,
+        )
         messagebox.showinfo("Sucesso", f"Produto '{nome}' cadastrado com sucesso.")
         self.reset()
         self.barcode_entry.focus_set()

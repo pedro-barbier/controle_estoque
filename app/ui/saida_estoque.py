@@ -1,7 +1,7 @@
 from datetime import datetime
 
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
 
 from app import storage
 
@@ -38,6 +38,12 @@ class SaidaEstoqueFrame(tk.Frame):
         self.tree.column("nome", width=250)
         self.tree.column("quantidade", width=100, anchor="center")
         self.tree.pack(pady=10, fill="both", expand=True, padx=20)
+        self.tree.bind("<Double-1>", self.on_tree_double_click)
+
+        tk.Label(
+            self.scan_step, text="Dica: dê duplo clique em um item para alterar a quantidade manualmente.",
+            fg="gray",
+        ).pack()
 
         btn_frame = tk.Frame(self.scan_step)
         btn_frame.pack(pady=10)
@@ -100,17 +106,41 @@ class SaidaEstoqueFrame(tk.Frame):
         self.barcode_var.set("")
         if not codigo:
             return "break"
-        produto = storage.buscar_produto(codigo)
-        if not produto:
+        item = storage.resolver_leitura_estoque(codigo)
+        if not item:
             self.status_label.config(text=f"Produto com código {codigo} não cadastrado.", fg="red")
             return "break"
-        if codigo in self.pendentes:
-            self.pendentes[codigo]["quantidade"] += 1
+        if item["quantidade"] <= 0:
+            self.status_label.config(text="Caixa com quantidade de pacotes inválida.", fg="red")
+            return "break"
+        chave = item["codigo_barras"]
+        if chave in self.pendentes:
+            self.pendentes[chave]["quantidade"] += item["quantidade"]
         else:
-            self.pendentes[codigo] = {"nome": produto["nome"], "quantidade": 1}
-        self.status_label.config(text=f"Adicionado: {produto['nome']}", fg="green")
+            self.pendentes[chave] = {"nome": item["nome"], "quantidade": item["quantidade"]}
+        self.status_label.config(text=f"Adicionado: {item['nome']} (+{item['quantidade']})", fg="green")
         self.refresh_tree()
         return "break"
+
+    def on_tree_double_click(self, event):
+        codigo = self.tree.identify_row(event.y)
+        if not codigo or codigo not in self.pendentes:
+            return
+        item = self.pendentes[codigo]
+        nova_qtd = simpledialog.askinteger(
+            "Alterar quantidade",
+            f"Nova quantidade para '{item['nome']}':",
+            initialvalue=item["quantidade"],
+            minvalue=0,
+            parent=self,
+        )
+        if nova_qtd is None:
+            return
+        if nova_qtd == 0:
+            del self.pendentes[codigo]
+        else:
+            item["quantidade"] = nova_qtd
+        self.refresh_tree()
 
     def try_advance(self):
         if self.em_detalhes:
