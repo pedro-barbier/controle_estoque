@@ -62,6 +62,8 @@ class RegistrarProdutoFrame(tk.Frame):
             self.form_frame, textvariable=self.relacionado_var, state="disabled", width=33, values=[],
         )
         self.relacionado_combo.grid(row=4, column=1, pady=5)
+        self.relacionado_combo.bind("<<ComboboxSelected>>", self._autopreencher_caixa)
+        self.qtd_var.trace_add("write", self._autopreencher_caixa)
 
         btn_frame = tk.Frame(self.form_frame)
         btn_frame.grid(row=5, column=0, columnspan=2, pady=15)
@@ -106,6 +108,30 @@ class RegistrarProdutoFrame(tk.Frame):
             f"{p['nome']} ({p['codigo_barras']})": p["codigo_barras"] for p in produtos
         }
         self.relacionado_combo.config(values=list(self.relacionado_map.keys()))
+
+    def _autopreencher_caixa(self, *_args):
+        """Preenche nome e peso a partir do produto relacionado e da quantidade de pacotes."""
+        if self.caixa_var.get() != "sim":
+            return
+        codigo_relacionado = self.relacionado_map.get(self.relacionado_var.get().strip())
+        if not codigo_relacionado:
+            return
+        relacionado = storage.buscar_produto(codigo_relacionado)
+        if not relacionado:
+            return
+        self.nome_var.set(f"Caixa {relacionado['nome']}")
+        qtd = self.qtd_var.get().strip()
+        if not qtd.isdigit() or int(qtd) <= 0:
+            return
+        try:
+            peso_relacionado = float(relacionado["peso_gramas"])
+        except (TypeError, ValueError):
+            return
+        peso_total = peso_relacionado * int(qtd)
+        self.peso_var.set(
+            str(int(peso_total)) if peso_total == int(peso_total) else f"{peso_total:g}"
+        )
+        self.peso_unidade_var.set("g")
 
     def on_barcode_submit(self, event=None):
         codigo = self.barcode_var.get().strip()

@@ -85,7 +85,7 @@ class SaidaEstoqueFrame(tk.Frame):
         self.barcode_var.set("")
         self.status_label.config(text="", fg="red")
         self.cliente_var.set("")
-        self.data_var.set("")
+        self.data_var.set(datetime.now().strftime("%d/%m/%Y"))
         self.refresh_tree()
 
     def refresh_tree(self):
