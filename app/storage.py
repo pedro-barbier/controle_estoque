@@ -2,9 +2,18 @@
 
 import csv
 import os
+import sys
 from datetime import datetime
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+if getattr(sys, "frozen", False):
+    # Executável empacotado (PyInstaller): __file__ aponta para a pasta
+    # temporária de extração, que é apagada a cada execução. Os dados
+    # precisam ficar ao lado do executável para persistir entre execuções.
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+DATA_DIR = os.path.join(BASE_DIR, "data")
 
 PRODUTOS_CSV = os.path.join(DATA_DIR, "produtos.csv")
 ENTRADAS_CSV = os.path.join(DATA_DIR, "entradas_estoque.csv")

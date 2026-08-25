@@ -1,0 +1,3 @@
+# Dependência apenas para gerar o executável (build_windows.bat / build_linux.sh).
+# O aplicativo em si não tem dependências externas.
+pyinstaller>=6.22
