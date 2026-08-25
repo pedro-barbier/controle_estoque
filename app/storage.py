@@ -85,3 +85,42 @@ def registrar_saida(itens, cliente, data_entrega):
             writer.writerow([
                 agora, item["codigo_barras"], item["nome"], item["quantidade"], cliente, data_entrega
             ])
+
+
+def listar_entradas():
+    ensure_files()
+    with open(ENTRADAS_CSV, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def listar_saidas():
+    ensure_files()
+    with open(SAIDAS_CSV, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def listar_movimentos():
+    """Une entradas e saídas em uma única lista, mais recente primeiro."""
+    movimentos = []
+    for item in listar_entradas():
+        movimentos.append({
+            "data_hora": item["data_hora"],
+            "tipo": "entrada",
+            "codigo_barras": item["codigo_barras"],
+            "nome": item["nome"],
+            "quantidade": item["quantidade"],
+            "cliente": "",
+            "data_entrega": "",
+        })
+    for item in listar_saidas():
+        movimentos.append({
+            "data_hora": item["data_hora"],
+            "tipo": "saida",
+            "codigo_barras": item["codigo_barras"],
+            "nome": item["nome"],
+            "quantidade": item["quantidade"],
+            "cliente": item["cliente"],
+            "data_entrega": item["data_entrega"],
+        })
+    movimentos.sort(key=lambda m: m["data_hora"], reverse=True)
+    return movimentos

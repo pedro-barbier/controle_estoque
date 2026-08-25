@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 
 from app import storage
 
@@ -28,11 +28,18 @@ class RegistrarProdutoFrame(tk.Frame):
 
         tk.Label(self.form_frame, text="Nome do produto:").grid(row=0, column=0, sticky="e", pady=5)
         self.nome_var = tk.StringVar()
-        tk.Entry(self.form_frame, textvariable=self.nome_var, width=35).grid(row=0, column=1, pady=5)
+        self.nome_entry = tk.Entry(self.form_frame, textvariable=self.nome_var, width=35)
+        self.nome_entry.grid(row=0, column=1, pady=5)
 
-        tk.Label(self.form_frame, text="Peso (gramas):").grid(row=1, column=0, sticky="e", pady=5)
+        tk.Label(self.form_frame, text="Peso:").grid(row=1, column=0, sticky="e", pady=5)
+        peso_sub = tk.Frame(self.form_frame)
+        peso_sub.grid(row=1, column=1, sticky="w")
         self.peso_var = tk.StringVar()
-        tk.Entry(self.form_frame, textvariable=self.peso_var, width=35).grid(row=1, column=1, pady=5)
+        tk.Entry(peso_sub, textvariable=self.peso_var, width=15).pack(side="left")
+        self.peso_unidade_var = tk.StringVar(value="g")
+        ttk.Combobox(
+            peso_sub, textvariable=self.peso_unidade_var, state="readonly", width=5, values=["g", "kg"],
+        ).pack(side="left", padx=5)
 
         tk.Label(self.form_frame, text="É caixa?").grid(row=2, column=0, sticky="e", pady=5)
         self.caixa_var = tk.StringVar(value="nao")
@@ -64,6 +71,7 @@ class RegistrarProdutoFrame(tk.Frame):
         self.barcode_var.set("")
         self.nome_var.set("")
         self.peso_var.set("")
+        self.peso_unidade_var.set("g")
         self.caixa_var.set("nao")
         self.qtd_var.set("")
         self.qtd_entry.config(state="disabled")
@@ -80,16 +88,17 @@ class RegistrarProdutoFrame(tk.Frame):
     def on_barcode_submit(self, event=None):
         codigo = self.barcode_var.get().strip()
         if not codigo:
-            return
+            return "break"
         existente = storage.buscar_produto(codigo)
         if existente:
             self.status_label.config(text=f"Produto já cadastrado: {existente['nome']}", fg="red")
             self.form_frame.pack_forget()
             self.codigo_atual = None
-            return
+            return "break"
         self.codigo_atual = codigo
         self.status_label.config(text=f"Código lido: {codigo}. Preencha os dados abaixo.", fg="green")
         self.form_frame.pack(pady=10)
+        return "break"
 
     def on_save(self):
         if not self.codigo_atual:
@@ -108,6 +117,8 @@ class RegistrarProdutoFrame(tk.Frame):
         except ValueError:
             messagebox.showwarning("Atenção", "Peso inválido. Use apenas números.")
             return
+        if self.peso_unidade_var.get() == "kg":
+            peso_val *= 1000
         if e_caixa and (not qtd.isdigit() or int(qtd) <= 0):
             messagebox.showwarning("Atenção", "Informe a quantidade de pacotes (número inteiro maior que zero).")
             return
@@ -121,6 +132,14 @@ class RegistrarProdutoFrame(tk.Frame):
         self.reset()
         self.barcode_entry.focus_set()
 
+    def try_advance(self):
+        if self.codigo_atual:
+            self.on_save()
+
     def on_back_to_menu(self):
+        if self.codigo_atual and not messagebox.askyesno(
+            "Atenção", "Existe um cadastro em andamento. Deseja cancelar e voltar ao menu?"
+        ):
+            return
         self.reset()
         self.controller.show_frame("MainMenu")

@@ -58,13 +58,13 @@ class RemoverProdutoFrame(tk.Frame):
     def on_barcode_submit(self, event=None):
         codigo = self.barcode_var.get().strip()
         if not codigo:
-            return
+            return "break"
         produto = storage.buscar_produto(codigo)
         if not produto:
             self.status_label.config(text="Produto não encontrado.", fg="red")
             self.info_frame.pack_forget()
             self.produto_atual = None
-            return
+            return "break"
         self.produto_atual = produto
         self.status_label.config(text="Produto encontrado. Confirme a remoção abaixo.", fg="green")
         self.info_labels["nome"].config(text=produto["nome"])
@@ -72,6 +72,11 @@ class RemoverProdutoFrame(tk.Frame):
         self.info_labels["e_caixa"].config(text="Sim" if produto["e_caixa"] == "sim" else "Não")
         self.info_labels["quantidade_pacotes"].config(text=produto["quantidade_pacotes"] or "-")
         self.info_frame.pack(pady=10)
+        return "break"
+
+    def try_advance(self):
+        if self.produto_atual:
+            self.on_confirm()
 
     def on_confirm(self):
         if not self.produto_atual:
@@ -87,5 +92,9 @@ class RemoverProdutoFrame(tk.Frame):
         self.barcode_entry.focus_set()
 
     def on_back_to_menu(self):
+        if self.produto_atual and not messagebox.askyesno(
+            "Atenção", "Existe uma remoção em andamento. Deseja cancelar e voltar ao menu?"
+        ):
+            return
         self.reset()
         self.controller.show_frame("MainMenu")

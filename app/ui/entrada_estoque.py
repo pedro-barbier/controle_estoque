@@ -60,17 +60,22 @@ class EntradaEstoqueFrame(tk.Frame):
         codigo = self.barcode_var.get().strip()
         self.barcode_var.set("")
         if not codigo:
-            return
+            return "break"
         produto = storage.buscar_produto(codigo)
         if not produto:
             self.status_label.config(text=f"Produto com código {codigo} não cadastrado.", fg="red")
-            return
+            return "break"
         if codigo in self.pendentes:
             self.pendentes[codigo]["quantidade"] += 1
         else:
             self.pendentes[codigo] = {"nome": produto["nome"], "quantidade": 1}
         self.status_label.config(text=f"Adicionado: {produto['nome']}", fg="green")
         self.refresh_tree()
+        return "break"
+
+    def try_advance(self):
+        if self.pendentes:
+            self.on_finalize()
 
     def on_remove_selected(self):
         selecionado = self.tree.selection()

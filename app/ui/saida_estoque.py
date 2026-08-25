@@ -11,6 +11,7 @@ class SaidaEstoqueFrame(tk.Frame):
         super().__init__(parent)
         self.controller = controller
         self.pendentes = {}  # codigo_barras -> {"nome": str, "quantidade": int}
+        self.em_detalhes = False
 
         tk.Label(self, text="Remover do Estoque (Saída)", font=("TkDefaultFont", 16, "bold")).pack(pady=15)
 
@@ -85,10 +86,12 @@ class SaidaEstoqueFrame(tk.Frame):
             self.tree.insert("", "end", iid=codigo, values=(codigo, item["nome"], item["quantidade"]))
 
     def show_scan_step(self):
+        self.em_detalhes = False
         self.details_step.pack_forget()
         self.scan_step.pack(fill="both", expand=True)
 
     def show_details_step(self):
+        self.em_detalhes = True
         self.scan_step.pack_forget()
         self.details_step.pack(fill="both", expand=True)
 
@@ -96,17 +99,24 @@ class SaidaEstoqueFrame(tk.Frame):
         codigo = self.barcode_var.get().strip()
         self.barcode_var.set("")
         if not codigo:
-            return
+            return "break"
         produto = storage.buscar_produto(codigo)
         if not produto:
             self.status_label.config(text=f"Produto com código {codigo} não cadastrado.", fg="red")
-            return
+            return "break"
         if codigo in self.pendentes:
             self.pendentes[codigo]["quantidade"] += 1
         else:
             self.pendentes[codigo] = {"nome": produto["nome"], "quantidade": 1}
         self.status_label.config(text=f"Adicionado: {produto['nome']}", fg="green")
         self.refresh_tree()
+        return "break"
+
+    def try_advance(self):
+        if self.em_detalhes:
+            self.on_confirm_exit()
+        elif self.pendentes:
+            self.on_advance()
 
     def on_remove_selected(self):
         selecionado = self.tree.selection()

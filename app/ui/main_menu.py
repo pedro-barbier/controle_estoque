@@ -16,6 +16,7 @@ class MainMenu(tk.Frame):
             ("Remover Produto", "RemoverProdutoFrame"),
             ("Registrar para Estoque", "EntradaEstoqueFrame"),
             ("Remover do Estoque", "SaidaEstoqueFrame"),
+            ("Visualizar Estoque", "VisualizarEstoqueFrame"),
         ]
         for texto, frame_name in botoes:
             tk.Button(
