@@ -95,34 +95,70 @@ def remover_produto(codigo_barras):
     return True
 
 
-def resolver_leitura_estoque(codigo_barras):
-    """Resolve um código lido para o produto e a quantidade a aplicar no estoque.
+def descrever_item_estoque(codigo_barras):
+    """Descreve o produto identificado por um código lido na entrada/saída de estoque.
 
-    Se o código for de uma caixa, resolve para o produto relacionado com a
-    quantidade de pacotes cadastrada na caixa (em vez da caixa em si).
-    Retorna None se o produto (ou o produto relacionado da caixa) não existir.
+    Se o código for de uma caixa, o item descrito é a própria caixa (para que
+    apareça como tal na tela), junto com os dados do produto relacionado e a
+    quantidade de pacotes por caixa, usados depois para expandir a leitura em
+    unidades do produto ao finalizar (ver `expandir_itens_pendentes`).
+    Retorna None se o código não corresponder a nenhum produto cadastrado.
     """
     produto = buscar_produto(codigo_barras)
     if not produto:
         return None
-    if produto["e_caixa"] == "sim":
-        relacionado = buscar_produto(produto["produto_relacionado"])
-        if not relacionado:
-            return None
-        try:
-            quantidade = int(produto["quantidade_pacotes"])
-        except (TypeError, ValueError):
-            quantidade = 0
-        return {
-            "codigo_barras": relacionado["codigo_barras"],
-            "nome": relacionado["nome"],
-            "quantidade": quantidade,
-        }
-    return {
+    e_caixa = produto["e_caixa"] == "sim"
+    item = {
         "codigo_barras": produto["codigo_barras"],
         "nome": produto["nome"],
-        "quantidade": 1,
+        "e_caixa": e_caixa,
+        "produto_relacionado_codigo": None,
+        "produto_relacionado_nome": None,
+        "quantidade_pacotes": None,
     }
+    if e_caixa:
+        relacionado = buscar_produto(produto["produto_relacionado"])
+        if relacionado:
+            item["produto_relacionado_codigo"] = relacionado["codigo_barras"]
+            item["produto_relacionado_nome"] = relacionado["nome"]
+        try:
+            item["quantidade_pacotes"] = int(produto["quantidade_pacotes"])
+        except (TypeError, ValueError):
+            item["quantidade_pacotes"] = 0
+    return item
+
+
+def expandir_itens_pendentes(pendentes):
+    """Converte os itens pendentes (produtos e caixas) na lista final a registrar.
+
+    `pendentes` é um dict codigo_barras -> item (como montado nas telas de
+    entrada/saída, com base em `descrever_item_estoque`). Uma caixa é expandida
+    para o produto relacionado, multiplicando a quantidade de caixas lidas pela
+    quantidade de pacotes por caixa; quantidades do mesmo produto final são
+    somadas quando aparecem mais de uma vez (ex.: caixa + produto avulso).
+    """
+    agregados = {}
+    for item in pendentes.values():
+        if item["e_caixa"]:
+            codigo = item["produto_relacionado_codigo"]
+            nome = item["produto_relacionado_nome"]
+            quantidade = item["quantidade"] * item["quantidade_pacotes"]
+        else:
+            codigo = item["codigo_barras"]
+            nome = item["nome"]
+            quantidade = item["quantidade"]
+        registro = agregados.setdefault(codigo, {"codigo_barras": codigo, "nome": nome, "quantidade": 0})
+        registro["quantidade"] += quantidade
+    return list(agregados.values())
+
+
+def resetar_estoque():
+    """Apaga todo o histórico de entradas e saídas de estoque, mantendo os produtos cadastrados."""
+    ensure_files()
+    with open(ENTRADAS_CSV, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow(ENTRADAS_HEADERS)
+    with open(SAIDAS_CSV, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow(SAIDAS_HEADERS)
 
 
 def registrar_entrada(itens):

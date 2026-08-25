@@ -10,7 +10,7 @@ class SaidaEstoqueFrame(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
-        self.pendentes = {}  # codigo_barras -> {"nome": str, "quantidade": int}
+        self.pendentes = {}  # codigo_barras -> item (ver storage.descrever_item_estoque)
         self.em_detalhes = False
 
         tk.Label(self, text="Remover do Estoque (Saída)", font=("TkDefaultFont", 16, "bold")).pack(pady=15)
@@ -29,14 +29,16 @@ class SaidaEstoqueFrame(tk.Frame):
         self.status_label = tk.Label(self.scan_step, text="", fg="red")
         self.status_label.pack()
 
-        columns = ("codigo", "nome", "quantidade")
+        columns = ("codigo", "nome", "tipo", "quantidade")
         self.tree = ttk.Treeview(self.scan_step, columns=columns, show="headings", height=10)
         self.tree.heading("codigo", text="Código")
         self.tree.heading("nome", text="Nome")
+        self.tree.heading("tipo", text="Tipo")
         self.tree.heading("quantidade", text="Quantidade")
-        self.tree.column("codigo", width=150)
-        self.tree.column("nome", width=250)
-        self.tree.column("quantidade", width=100, anchor="center")
+        self.tree.column("codigo", width=140)
+        self.tree.column("nome", width=220)
+        self.tree.column("tipo", width=150)
+        self.tree.column("quantidade", width=90, anchor="center")
         self.tree.pack(pady=10, fill="both", expand=True, padx=20)
         self.tree.bind("<Double-1>", self.on_tree_double_click)
 
@@ -89,7 +91,8 @@ class SaidaEstoqueFrame(tk.Frame):
     def refresh_tree(self):
         self.tree.delete(*self.tree.get_children())
         for codigo, item in self.pendentes.items():
-            self.tree.insert("", "end", iid=codigo, values=(codigo, item["nome"], item["quantidade"]))
+            tipo = f"Caixa ({item['quantidade_pacotes']}un/cada)" if item["e_caixa"] else "Produto"
+            self.tree.insert("", "end", iid=codigo, values=(codigo, item["nome"], tipo, item["quantidade"]))
 
     def show_scan_step(self):
         self.em_detalhes = False
@@ -106,19 +109,22 @@ class SaidaEstoqueFrame(tk.Frame):
         self.barcode_var.set("")
         if not codigo:
             return "break"
-        item = storage.resolver_leitura_estoque(codigo)
+        item = storage.descrever_item_estoque(codigo)
         if not item:
             self.status_label.config(text=f"Produto com código {codigo} não cadastrado.", fg="red")
             return "break"
-        if item["quantidade"] <= 0:
-            self.status_label.config(text="Caixa com quantidade de pacotes inválida.", fg="red")
+        if item["e_caixa"] and (not item["produto_relacionado_codigo"] or item["quantidade_pacotes"] <= 0):
+            self.status_label.config(
+                text="Caixa sem produto relacionado ou quantidade de pacotes inválida.", fg="red",
+            )
             return "break"
         chave = item["codigo_barras"]
         if chave in self.pendentes:
-            self.pendentes[chave]["quantidade"] += item["quantidade"]
+            self.pendentes[chave]["quantidade"] += 1
         else:
-            self.pendentes[chave] = {"nome": item["nome"], "quantidade": item["quantidade"]}
-        self.status_label.config(text=f"Adicionado: {item['nome']} (+{item['quantidade']})", fg="green")
+            self.pendentes[chave] = {**item, "quantidade": 1}
+        rotulo = "Caixa adicionada" if item["e_caixa"] else "Adicionado"
+        self.status_label.config(text=f"{rotulo}: {item['nome']}", fg="green")
         self.refresh_tree()
         return "break"
 
@@ -127,9 +133,10 @@ class SaidaEstoqueFrame(tk.Frame):
         if not codigo or codigo not in self.pendentes:
             return
         item = self.pendentes[codigo]
+        unidade = "caixas" if item["e_caixa"] else "unidades"
         nova_qtd = simpledialog.askinteger(
             "Alterar quantidade",
-            f"Nova quantidade para '{item['nome']}':",
+            f"Nova quantidade de {unidade} para '{item['nome']}':",
             initialvalue=item["quantidade"],
             minvalue=0,
             parent=self,
@@ -186,10 +193,7 @@ class SaidaEstoqueFrame(tk.Frame):
         if not self._validar_data(data_entrega):
             messagebox.showwarning("Atenção", "Informe uma data válida no formato DD/MM/AAAA.")
             return
-        itens = [
-            {"codigo_barras": c, "nome": i["nome"], "quantidade": i["quantidade"]}
-            for c, i in self.pendentes.items()
-        ]
+        itens = storage.expandir_itens_pendentes(self.pendentes)
         storage.registrar_saida(itens, cliente, data_entrega)
         messagebox.showinfo("Sucesso", "Saída registrada com sucesso.")
         self.reset()
