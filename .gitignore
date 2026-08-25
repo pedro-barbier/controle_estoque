@@ -3,3 +3,8 @@
 .dolt/
 *.db
 .beads-credential-key
+
+# Dados de estoque (gerados em tempo de execução)
+data/*.csv
+__pycache__/
+*.pyc

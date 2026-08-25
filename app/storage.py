@@ -1,0 +1,87 @@
+"""Leitura e escrita dos dados da aplicação em arquivos CSV separados."""
+
+import csv
+import os
+from datetime import datetime
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+
+PRODUTOS_CSV = os.path.join(DATA_DIR, "produtos.csv")
+ENTRADAS_CSV = os.path.join(DATA_DIR, "entradas_estoque.csv")
+SAIDAS_CSV = os.path.join(DATA_DIR, "saidas_estoque.csv")
+
+PRODUTOS_HEADERS = ["codigo_barras", "nome", "peso_gramas", "e_caixa", "quantidade_pacotes"]
+ENTRADAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade"]
+SAIDAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade", "cliente", "data_entrega"]
+
+
+def _ensure_csv(path, headers):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    if not os.path.exists(path):
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(headers)
+
+
+def ensure_files():
+    _ensure_csv(PRODUTOS_CSV, PRODUTOS_HEADERS)
+    _ensure_csv(ENTRADAS_CSV, ENTRADAS_HEADERS)
+    _ensure_csv(SAIDAS_CSV, SAIDAS_HEADERS)
+
+
+def listar_produtos():
+    ensure_files()
+    with open(PRODUTOS_CSV, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def buscar_produto(codigo_barras):
+    for produto in listar_produtos():
+        if produto["codigo_barras"] == codigo_barras:
+            return produto
+    return None
+
+
+def adicionar_produto(codigo_barras, nome, peso_gramas, e_caixa, quantidade_pacotes):
+    ensure_files()
+    with open(PRODUTOS_CSV, "a", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow([
+            codigo_barras,
+            nome,
+            peso_gramas,
+            "sim" if e_caixa else "nao",
+            quantidade_pacotes if e_caixa else "",
+        ])
+
+
+def remover_produto(codigo_barras):
+    produtos = listar_produtos()
+    restantes = [p for p in produtos if p["codigo_barras"] != codigo_barras]
+    if len(restantes) == len(produtos):
+        return False
+    with open(PRODUTOS_CSV, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=PRODUTOS_HEADERS)
+        writer.writeheader()
+        writer.writerows(restantes)
+    return True
+
+
+def registrar_entrada(itens):
+    """itens: lista de dicts com codigo_barras, nome, quantidade."""
+    ensure_files()
+    agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(ENTRADAS_CSV, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        for item in itens:
+            writer.writerow([agora, item["codigo_barras"], item["nome"], item["quantidade"]])
+
+
+def registrar_saida(itens, cliente, data_entrega):
+    """itens: lista de dicts com codigo_barras, nome, quantidade."""
+    ensure_files()
+    agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(SAIDAS_CSV, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        for item in itens:
+            writer.writerow([
+                agora, item["codigo_barras"], item["nome"], item["quantidade"], cliente, data_entrega
+            ])
