@@ -5,6 +5,29 @@ from tkinter import ttk
 
 from app import storage
 
+COLUNAS_MOVIMENTOS = ("data_hora", "tipo", "codigo", "nome", "quantidade", "cliente", "data_entrega")
+HEADERS_MOVIMENTOS = {
+    "data_hora": "Data/Hora",
+    "tipo": "Tipo",
+    "codigo": "Código",
+    "nome": "Nome",
+    "quantidade": "Qtd.",
+    "cliente": "Cliente",
+    "data_entrega": "Entrega",
+}
+WIDTHS_MOVIMENTOS = {
+    "data_hora": 130, "tipo": 70, "codigo": 110, "nome": 200,
+    "quantidade": 55, "cliente": 130, "data_entrega": 90,
+}
+
+COLUNAS_REAIS = ("codigo", "nome", "quantidade")
+HEADERS_REAIS = {
+    "codigo": "Código",
+    "nome": "Nome",
+    "quantidade": "Quantidade em Estoque",
+}
+WIDTHS_REAIS = {"codigo": 150, "nome": 320, "quantidade": 180}
+
 
 class VisualizarEstoqueFrame(tk.Frame):
     def __init__(self, parent, controller):
@@ -18,43 +41,35 @@ class VisualizarEstoqueFrame(tk.Frame):
 
         tk.Label(filtro_frame, text="Tipo:").grid(row=0, column=0, sticky="e", padx=5, pady=3)
         self.tipo_var = tk.StringVar(value="todos")
-        ttk.Combobox(
+        self.tipo_combo = ttk.Combobox(
             filtro_frame, textvariable=self.tipo_var, state="readonly", width=10,
             values=["todos", "entrada", "saida"],
-        ).grid(row=0, column=1, padx=5, pady=3)
+        )
+        self.tipo_combo.grid(row=0, column=1, padx=5, pady=3)
 
         tk.Label(filtro_frame, text="Cliente:").grid(row=0, column=2, sticky="e", padx=5, pady=3)
         self.cliente_var = tk.StringVar()
-        tk.Entry(filtro_frame, textvariable=self.cliente_var, width=18).grid(row=0, column=3, padx=5, pady=3)
+        self.cliente_entry = tk.Entry(filtro_frame, textvariable=self.cliente_var, width=18)
+        self.cliente_entry.grid(row=0, column=3, padx=5, pady=3)
 
         tk.Label(filtro_frame, text="Data (DD/MM/AAAA):").grid(row=0, column=4, sticky="e", padx=5, pady=3)
         self.data_var = tk.StringVar()
-        tk.Entry(filtro_frame, textvariable=self.data_var, width=14).grid(row=0, column=5, padx=5, pady=3)
+        self.data_entry = tk.Entry(filtro_frame, textvariable=self.data_var, width=14)
+        self.data_entry.grid(row=0, column=5, padx=5, pady=3)
+
+        self.quantidades_reais_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            filtro_frame, text="Quantidades reais", variable=self.quantidades_reais_var,
+            command=self.on_toggle_quantidades_reais,
+        ).grid(row=1, column=0, columnspan=3, sticky="w", padx=5, pady=(8, 0))
 
         btn_filtro_frame = tk.Frame(self)
         btn_filtro_frame.pack(pady=5)
         tk.Button(btn_filtro_frame, text="Filtrar", command=self.aplicar_filtros).pack(side="left", padx=5)
         tk.Button(btn_filtro_frame, text="Limpar Filtros", command=self.limpar_filtros).pack(side="left", padx=5)
 
-        columns = ("data_hora", "tipo", "codigo", "nome", "quantidade", "cliente", "data_entrega")
-        headers = {
-            "data_hora": "Data/Hora",
-            "tipo": "Tipo",
-            "codigo": "Código",
-            "nome": "Nome",
-            "quantidade": "Qtd.",
-            "cliente": "Cliente",
-            "data_entrega": "Entrega",
-        }
-        widths = {
-            "data_hora": 130, "tipo": 70, "codigo": 110, "nome": 200,
-            "quantidade": 55, "cliente": 130, "data_entrega": 90,
-        }
-        self.tree = ttk.Treeview(self, columns=columns, show="headings", height=14)
-        for col in columns:
-            self.tree.heading(col, text=headers[col])
-            anchor = "center" if col in ("tipo", "quantidade") else "w"
-            self.tree.column(col, width=widths[col], anchor=anchor)
+        self.tree = ttk.Treeview(self, columns=COLUNAS_MOVIMENTOS, show="headings", height=14)
+        self._configurar_colunas(COLUNAS_MOVIMENTOS, HEADERS_MOVIMENTOS, WIDTHS_MOVIMENTOS)
         self.tree.pack(pady=10, fill="both", expand=True, padx=20)
 
         tk.Button(self, text="Voltar ao Menu", command=self.on_back_to_menu).pack(side="bottom", pady=15)
@@ -66,9 +81,35 @@ class VisualizarEstoqueFrame(tk.Frame):
         self.tipo_var.set("todos")
         self.cliente_var.set("")
         self.data_var.set("")
+        self.quantidades_reais_var.set(False)
+        self._atualizar_estado_filtros()
         self.aplicar_filtros()
 
+    def on_toggle_quantidades_reais(self):
+        self._atualizar_estado_filtros()
+        self.aplicar_filtros()
+
+    def _atualizar_estado_filtros(self):
+        desabilitar = self.quantidades_reais_var.get()
+        self.tipo_combo.config(state="disabled" if desabilitar else "readonly")
+        self.cliente_entry.config(state="disabled" if desabilitar else "normal")
+        self.data_entry.config(state="disabled" if desabilitar else "normal")
+
+    def _configurar_colunas(self, columns, headers, widths):
+        self.tree["columns"] = columns
+        for col in columns:
+            self.tree.heading(col, text=headers[col])
+            anchor = "center" if col in ("tipo", "quantidade") else "w"
+            self.tree.column(col, width=widths[col], anchor=anchor)
+
     def aplicar_filtros(self):
+        if self.quantidades_reais_var.get():
+            self._mostrar_quantidades_reais()
+        else:
+            self._mostrar_movimentos()
+
+    def _mostrar_movimentos(self):
+        self._configurar_colunas(COLUNAS_MOVIMENTOS, HEADERS_MOVIMENTOS, WIDTHS_MOVIMENTOS)
         movimentos = storage.listar_movimentos()
 
         tipo = self.tipo_var.get()
@@ -94,6 +135,14 @@ class VisualizarEstoqueFrame(tk.Frame):
                 m["quantidade"],
                 m["cliente"],
                 m["data_entrega"],
+            ))
+
+    def _mostrar_quantidades_reais(self):
+        self._configurar_colunas(COLUNAS_REAIS, HEADERS_REAIS, WIDTHS_REAIS)
+        self.tree.delete(*self.tree.get_children())
+        for produto in storage.calcular_quantidades_reais():
+            self.tree.insert("", "end", values=(
+                produto["codigo_barras"], produto["nome"], produto["quantidade"],
             ))
 
     @staticmethod

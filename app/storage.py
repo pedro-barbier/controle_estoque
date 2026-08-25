@@ -124,3 +124,22 @@ def listar_movimentos():
         })
     movimentos.sort(key=lambda m: m["data_hora"], reverse=True)
     return movimentos
+
+
+def calcular_quantidades_reais():
+    """Quantidade atual em estoque por produto: soma das entradas menos soma das saídas."""
+    saldo = {}
+    for item in listar_entradas():
+        codigo = item["codigo_barras"]
+        registro = saldo.setdefault(codigo, {"nome": item["nome"], "quantidade": 0})
+        registro["quantidade"] += int(item["quantidade"])
+    for item in listar_saidas():
+        codigo = item["codigo_barras"]
+        registro = saldo.setdefault(codigo, {"nome": item["nome"], "quantidade": 0})
+        registro["quantidade"] -= int(item["quantidade"])
+    resultado = [
+        {"codigo_barras": codigo, "nome": dados["nome"], "quantidade": dados["quantidade"]}
+        for codigo, dados in saldo.items()
+    ]
+    resultado.sort(key=lambda r: r["nome"].lower())
+    return resultado
