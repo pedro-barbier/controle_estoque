@@ -57,6 +57,15 @@ class VisualizarEstoqueFrame(tk.Frame):
         self.data_entry = tk.Entry(filtro_frame, textvariable=self.data_var, width=14)
         self.data_entry.grid(row=0, column=5, padx=5, pady=3)
 
+        tk.Label(filtro_frame, text="Produto:").grid(row=0, column=6, sticky="e", padx=5, pady=3)
+        self.produto_var = tk.StringVar(value="todos")
+        self.produto_map = {}
+        self.produto_combo = ttk.Combobox(
+            filtro_frame, textvariable=self.produto_var, state="readonly", width=25, values=["todos"],
+        )
+        self.produto_combo.grid(row=0, column=7, padx=5, pady=3)
+        self.produto_combo.bind("<<ComboboxSelected>>", lambda e: self.aplicar_filtros())
+
         self.quantidades_reais_var = tk.BooleanVar(value=False)
         tk.Checkbutton(
             filtro_frame, text="Quantidades reais", variable=self.quantidades_reais_var,
@@ -78,12 +87,23 @@ class VisualizarEstoqueFrame(tk.Frame):
         self.limpar_filtros()
 
     def limpar_filtros(self):
+        self._popular_produtos()
         self.tipo_var.set("todos")
         self.cliente_var.set("")
         self.data_var.set("")
+        self.produto_var.set("todos")
         self.quantidades_reais_var.set(False)
         self._atualizar_estado_filtros()
         self.aplicar_filtros()
+
+    def _popular_produtos(self):
+        """Popula o filtro de produto, excluindo caixas (que não aparecem nos registros)."""
+        produtos = [p for p in storage.listar_produtos() if p["e_caixa"] != "sim"]
+        produtos.sort(key=lambda p: p["nome"].lower())
+        self.produto_map = {
+            f"{p['nome']} ({p['codigo_barras']})": p["codigo_barras"] for p in produtos
+        }
+        self.produto_combo.config(values=["todos"] + list(self.produto_map.keys()))
 
     def on_toggle_quantidades_reais(self):
         self._atualizar_estado_filtros()
@@ -125,6 +145,10 @@ class VisualizarEstoqueFrame(tk.Frame):
             data_iso = self._data_para_iso(data)
             movimentos = [m for m in movimentos if m["data_hora"].startswith(data_iso)]
 
+        codigo_produto = self.produto_map.get(self.produto_var.get())
+        if codigo_produto:
+            movimentos = [m for m in movimentos if m["codigo_barras"] == codigo_produto]
+
         self.tree.delete(*self.tree.get_children())
         for m in movimentos:
             self.tree.insert("", "end", values=(
@@ -139,8 +163,14 @@ class VisualizarEstoqueFrame(tk.Frame):
 
     def _mostrar_quantidades_reais(self):
         self._configurar_colunas(COLUNAS_REAIS, HEADERS_REAIS, WIDTHS_REAIS)
+        quantidades = storage.calcular_quantidades_reais()
+
+        codigo_produto = self.produto_map.get(self.produto_var.get())
+        if codigo_produto:
+            quantidades = [q for q in quantidades if q["codigo_barras"] == codigo_produto]
+
         self.tree.delete(*self.tree.get_children())
-        for produto in storage.calcular_quantidades_reais():
+        for produto in quantidades:
             self.tree.insert("", "end", values=(
                 produto["codigo_barras"], produto["nome"], produto["quantidade"],
             ))
