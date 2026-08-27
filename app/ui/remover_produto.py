@@ -28,7 +28,7 @@ class RemoverProdutoFrame(tk.Frame):
         self.info_labels = {}
         campos = [
             ("nome", "Nome"),
-            ("peso_gramas", "Peso (g)"),
+            ("valor", "Valor"),
             ("e_caixa", "É caixa"),
             ("quantidade_pacotes", "Qtd. pacotes"),
             ("produto_relacionado", "Produto relacionado"),
@@ -69,7 +69,7 @@ class RemoverProdutoFrame(tk.Frame):
         self.produto_atual = produto
         self.status_label.config(text="Produto encontrado. Confirme a remoção abaixo.", fg="green")
         self.info_labels["nome"].config(text=produto["nome"])
-        self.info_labels["peso_gramas"].config(text=produto["peso_gramas"])
+        self.info_labels["valor"].config(text=f"{produto['valor']} {produto['unidade_medida']}".strip())
         self.info_labels["e_caixa"].config(text="Sim" if produto["e_caixa"] == "sim" else "Não")
         self.info_labels["quantidade_pacotes"].config(text=produto["quantidade_pacotes"] or "-")
         relacionado_texto = "-"

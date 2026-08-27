@@ -20,7 +20,7 @@ ENTRADAS_CSV = os.path.join(DATA_DIR, "entradas_estoque.csv")
 SAIDAS_CSV = os.path.join(DATA_DIR, "saidas_estoque.csv")
 
 PRODUTOS_HEADERS = [
-    "codigo_barras", "nome", "peso_gramas", "e_caixa", "quantidade_pacotes", "produto_relacionado",
+    "codigo_barras", "nome", "valor", "unidade_medida", "e_caixa", "quantidade_pacotes", "produto_relacionado",
 ]
 ENTRADAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade"]
 SAIDAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade", "cliente", "data_entrega"]
@@ -47,7 +47,12 @@ def _migrar_produtos_csv():
         writer = csv.DictWriter(f, fieldnames=PRODUTOS_HEADERS)
         writer.writeheader()
         for linha in linhas:
-            writer.writerow({campo: linha.get(campo, "") for campo in PRODUTOS_HEADERS})
+            nova = {campo: linha.get(campo, "") for campo in PRODUTOS_HEADERS}
+            if not nova["valor"] and linha.get("peso_gramas"):
+                # Versões anteriores só tinham peso, sempre normalizado em gramas.
+                nova["valor"] = linha["peso_gramas"]
+                nova["unidade_medida"] = "g"
+            writer.writerow(nova)
 
 
 def ensure_files():
@@ -70,13 +75,14 @@ def buscar_produto(codigo_barras):
     return None
 
 
-def adicionar_produto(codigo_barras, nome, peso_gramas, e_caixa, quantidade_pacotes, produto_relacionado=""):
+def adicionar_produto(codigo_barras, nome, valor, unidade_medida, e_caixa, quantidade_pacotes, produto_relacionado=""):
     ensure_files()
     with open(PRODUTOS_CSV, "a", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow([
             codigo_barras,
             nome,
-            peso_gramas,
+            valor,
+            unidade_medida,
             "sim" if e_caixa else "nao",
             quantidade_pacotes if e_caixa else "",
             produto_relacionado if e_caixa else "",

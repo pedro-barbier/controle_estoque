@@ -4,6 +4,14 @@ from tkinter import messagebox, ttk
 from app import storage
 
 
+ROTULOS_POR_UNIDADE = {
+    "kg": "Peso:",
+    "g": "Peso:",
+    "ml": "Volume:",
+    "unidades": "Quantidade:",
+}
+
+
 class RegistrarProdutoFrame(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
@@ -32,15 +40,18 @@ class RegistrarProdutoFrame(tk.Frame):
         self.nome_entry = tk.Entry(self.form_frame, textvariable=self.nome_var, width=35)
         self.nome_entry.grid(row=0, column=1, pady=5)
 
-        tk.Label(self.form_frame, text="Peso:").grid(row=1, column=0, sticky="e", pady=5)
-        peso_sub = tk.Frame(self.form_frame)
-        peso_sub.grid(row=1, column=1, sticky="w")
-        self.peso_var = tk.StringVar()
-        tk.Entry(peso_sub, textvariable=self.peso_var, width=15).pack(side="left")
-        self.peso_unidade_var = tk.StringVar(value="g")
+        self.valor_label = tk.Label(self.form_frame, text="Peso:")
+        self.valor_label.grid(row=1, column=0, sticky="e", pady=5)
+        valor_sub = tk.Frame(self.form_frame)
+        valor_sub.grid(row=1, column=1, sticky="w")
+        self.valor_var = tk.StringVar()
+        tk.Entry(valor_sub, textvariable=self.valor_var, width=15).pack(side="left")
+        self.unidade_var = tk.StringVar(value="g")
         ttk.Combobox(
-            peso_sub, textvariable=self.peso_unidade_var, state="readonly", width=5, values=["g", "kg"],
+            valor_sub, textvariable=self.unidade_var, state="readonly", width=8,
+            values=["kg", "g", "ml", "unidades"],
         ).pack(side="left", padx=5)
+        self.unidade_var.trace_add("write", self._atualizar_rotulo_valor)
 
         tk.Label(self.form_frame, text="É caixa?").grid(row=2, column=0, sticky="e", pady=5)
         self.caixa_var = tk.StringVar(value="nao")
@@ -76,12 +87,16 @@ class RegistrarProdutoFrame(tk.Frame):
         self.reset()
         self.barcode_entry.focus_set()
 
+    def _atualizar_rotulo_valor(self, *_args):
+        self.valor_label.config(text=ROTULOS_POR_UNIDADE.get(self.unidade_var.get(), "Peso:"))
+
     def reset(self):
         self.codigo_atual = None
         self.barcode_var.set("")
         self.nome_var.set("")
-        self.peso_var.set("")
-        self.peso_unidade_var.set("g")
+        self.valor_var.set("")
+        self.unidade_var.set("g")
+        self._atualizar_rotulo_valor()
         self.caixa_var.set("nao")
         self.qtd_var.set("")
         self.qtd_entry.config(state="disabled")
@@ -110,7 +125,7 @@ class RegistrarProdutoFrame(tk.Frame):
         self.relacionado_combo.config(values=list(self.relacionado_map.keys()))
 
     def _autopreencher_caixa(self, *_args):
-        """Preenche nome e peso a partir do produto relacionado e da quantidade de pacotes."""
+        """Preenche nome e valor a partir do produto relacionado e da quantidade de pacotes."""
         if self.caixa_var.get() != "sim":
             return
         codigo_relacionado = self.relacionado_map.get(self.relacionado_var.get().strip())
@@ -124,14 +139,14 @@ class RegistrarProdutoFrame(tk.Frame):
         if not qtd.isdigit() or int(qtd) <= 0:
             return
         try:
-            peso_relacionado = float(relacionado["peso_gramas"])
+            valor_relacionado = float(relacionado["valor"])
         except (TypeError, ValueError):
             return
-        peso_total = peso_relacionado * int(qtd)
-        self.peso_var.set(
-            str(int(peso_total)) if peso_total == int(peso_total) else f"{peso_total:g}"
+        valor_total = valor_relacionado * int(qtd)
+        self.valor_var.set(
+            str(int(valor_total)) if valor_total == int(valor_total) else f"{valor_total:g}"
         )
-        self.peso_unidade_var.set("g")
+        self.unidade_var.set(relacionado["unidade_medida"] or "g")
 
     def on_barcode_submit(self, event=None):
         codigo = self.barcode_var.get().strip()
@@ -153,7 +168,8 @@ class RegistrarProdutoFrame(tk.Frame):
             messagebox.showwarning("Atenção", "Leia um código de barras antes de salvar.")
             return
         nome = self.nome_var.get().strip()
-        peso = self.peso_var.get().strip()
+        valor = self.valor_var.get().strip()
+        unidade = self.unidade_var.get()
         e_caixa = self.caixa_var.get() == "sim"
         qtd = self.qtd_var.get().strip()
 
@@ -161,12 +177,11 @@ class RegistrarProdutoFrame(tk.Frame):
             messagebox.showwarning("Atenção", "Informe o nome do produto.")
             return
         try:
-            peso_val = float(peso.replace(",", "."))
+            valor_val = float(valor.replace(",", "."))
         except ValueError:
-            messagebox.showwarning("Atenção", "Peso inválido. Use apenas números.")
+            rotulo = ROTULOS_POR_UNIDADE.get(unidade, "Valor").rstrip(":")
+            messagebox.showwarning("Atenção", f"{rotulo} inválido. Use apenas números.")
             return
-        if self.peso_unidade_var.get() == "kg":
-            peso_val *= 1000
         if e_caixa and (not qtd.isdigit() or int(qtd) <= 0):
             messagebox.showwarning("Atenção", "Informe a quantidade de pacotes (número inteiro maior que zero).")
             return
@@ -184,7 +199,7 @@ class RegistrarProdutoFrame(tk.Frame):
                 return
 
         storage.adicionar_produto(
-            self.codigo_atual, nome, peso_val, e_caixa, qtd if e_caixa else "", produto_relacionado,
+            self.codigo_atual, nome, valor_val, unidade, e_caixa, qtd if e_caixa else "", produto_relacionado,
         )
         messagebox.showinfo("Sucesso", f"Produto '{nome}' cadastrado com sucesso.")
         self.reset()
