@@ -1,6 +1,7 @@
 import tkinter as tk
 
 from app import storage
+from app.ui.clientes import ClientesFrame
 from app.ui.entrada_estoque import EntradaEstoqueFrame
 from app.ui.main_menu import MainMenu
 from app.ui.remover_produto import RemoverProdutoFrame
@@ -13,8 +14,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Controle de Estoque - Café")
-        self.geometry("700x600")
-        self.minsize(600, 480)
+        self.geometry("1080x650")
+        self.minsize(950, 550)
 
         container = tk.Frame(self)
         container.pack(fill="both", expand=True)
@@ -26,6 +27,7 @@ class App(tk.Tk):
             MainMenu,
             RegistrarProdutoFrame,
             RemoverProdutoFrame,
+            ClientesFrame,
             EntradaEstoqueFrame,
             SaidaEstoqueFrame,
             VisualizarEstoqueFrame,

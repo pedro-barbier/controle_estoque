@@ -18,12 +18,14 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 PRODUTOS_CSV = os.path.join(DATA_DIR, "produtos.csv")
 ENTRADAS_CSV = os.path.join(DATA_DIR, "entradas_estoque.csv")
 SAIDAS_CSV = os.path.join(DATA_DIR, "saidas_estoque.csv")
+CLIENTES_CSV = os.path.join(DATA_DIR, "clientes.csv")
 
 PRODUTOS_HEADERS = [
     "codigo_barras", "nome", "valor", "unidade_medida", "e_caixa", "quantidade_pacotes", "produto_relacionado",
 ]
 ENTRADAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade"]
 SAIDAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade", "cliente", "data_entrega"]
+CLIENTES_HEADERS = ["id", "nome", "unidade"]
 
 
 def _ensure_csv(path, headers):
@@ -60,6 +62,7 @@ def ensure_files():
     _migrar_produtos_csv()
     _ensure_csv(ENTRADAS_CSV, ENTRADAS_HEADERS)
     _ensure_csv(SAIDAS_CSV, SAIDAS_HEADERS)
+    _ensure_csv(CLIENTES_CSV, CLIENTES_HEADERS)
 
 
 def listar_produtos():
@@ -96,6 +99,44 @@ def remover_produto(codigo_barras):
         return False
     with open(PRODUTOS_CSV, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=PRODUTOS_HEADERS)
+        writer.writeheader()
+        writer.writerows(restantes)
+    return True
+
+
+def listar_clientes():
+    ensure_files()
+    with open(CLIENTES_CSV, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def nome_completo_cliente(cliente):
+    """Nome de exibição do cliente, incluindo a unidade/localidade quando houver.
+
+    Esse é o texto usado tanto para selecionar o cliente na saída de estoque
+    quanto para filtrar por ele na visualização de estoque, garantindo que o
+    mesmo cliente sempre apareça com o mesmo nome nos dois lugares.
+    """
+    unidade = (cliente.get("unidade") or "").strip()
+    return f"{cliente['nome']} - {unidade}" if unidade else cliente["nome"]
+
+
+def adicionar_cliente(nome, unidade=""):
+    ensure_files()
+    clientes = listar_clientes()
+    proximo_id = str(max((int(c["id"]) for c in clientes), default=0) + 1)
+    with open(CLIENTES_CSV, "a", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow([proximo_id, nome, unidade])
+    return proximo_id
+
+
+def remover_cliente(cliente_id):
+    clientes = listar_clientes()
+    restantes = [c for c in clientes if c["id"] != cliente_id]
+    if len(restantes) == len(clientes):
+        return False
+    with open(CLIENTES_CSV, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CLIENTES_HEADERS)
         writer.writeheader()
         writer.writerows(restantes)
     return True

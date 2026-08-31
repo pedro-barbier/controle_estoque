@@ -48,9 +48,12 @@ class VisualizarEstoqueFrame(tk.Frame):
         self.tipo_combo.grid(row=0, column=1, padx=5, pady=3)
 
         tk.Label(filtro_frame, text="Cliente:").grid(row=0, column=2, sticky="e", padx=5, pady=3)
-        self.cliente_var = tk.StringVar()
-        self.cliente_entry = tk.Entry(filtro_frame, textvariable=self.cliente_var, width=18)
-        self.cliente_entry.grid(row=0, column=3, padx=5, pady=3)
+        self.cliente_var = tk.StringVar(value="todos")
+        self.cliente_combo = ttk.Combobox(
+            filtro_frame, textvariable=self.cliente_var, state="readonly", width=18, values=["todos"],
+        )
+        self.cliente_combo.grid(row=0, column=3, padx=5, pady=3)
+        self.cliente_combo.bind("<<ComboboxSelected>>", lambda e: self.aplicar_filtros())
 
         tk.Label(filtro_frame, text="Data (DD/MM/AAAA):").grid(row=0, column=4, sticky="e", padx=5, pady=3)
         self.data_var = tk.StringVar()
@@ -88,8 +91,9 @@ class VisualizarEstoqueFrame(tk.Frame):
 
     def limpar_filtros(self):
         self._popular_produtos()
+        self._popular_clientes()
         self.tipo_var.set("todos")
-        self.cliente_var.set("")
+        self.cliente_var.set("todos")
         self.data_var.set("")
         self.produto_var.set("todos")
         self.quantidades_reais_var.set(False)
@@ -105,6 +109,13 @@ class VisualizarEstoqueFrame(tk.Frame):
         }
         self.produto_combo.config(values=["todos"] + list(self.produto_map.keys()))
 
+    def _popular_clientes(self):
+        """Popula o filtro de cliente com os clientes cadastrados, para casar com o valor exato
+        gravado na saída de estoque (evitando divergência de nomes)."""
+        clientes = sorted(storage.listar_clientes(), key=lambda c: (c["nome"].lower(), c["unidade"].lower()))
+        nomes = [storage.nome_completo_cliente(c) for c in clientes]
+        self.cliente_combo.config(values=["todos"] + nomes)
+
     def on_toggle_quantidades_reais(self):
         self._atualizar_estado_filtros()
         self.aplicar_filtros()
@@ -112,7 +123,7 @@ class VisualizarEstoqueFrame(tk.Frame):
     def _atualizar_estado_filtros(self):
         desabilitar = self.quantidades_reais_var.get()
         self.tipo_combo.config(state="disabled" if desabilitar else "readonly")
-        self.cliente_entry.config(state="disabled" if desabilitar else "normal")
+        self.cliente_combo.config(state="disabled" if desabilitar else "readonly")
         self.data_entry.config(state="disabled" if desabilitar else "normal")
 
     def _configurar_colunas(self, columns, headers, widths):
@@ -136,9 +147,9 @@ class VisualizarEstoqueFrame(tk.Frame):
         if tipo != "todos":
             movimentos = [m for m in movimentos if m["tipo"] == tipo]
 
-        cliente = self.cliente_var.get().strip().lower()
-        if cliente:
-            movimentos = [m for m in movimentos if cliente in m["cliente"].lower()]
+        cliente = self.cliente_var.get()
+        if cliente and cliente != "todos":
+            movimentos = [m for m in movimentos if m["cliente"] == cliente]
 
         data = self.data_var.get().strip()
         if data:

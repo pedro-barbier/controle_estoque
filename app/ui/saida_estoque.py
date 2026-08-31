@@ -62,7 +62,10 @@ class SaidaEstoqueFrame(tk.Frame):
         form.pack(pady=20)
         tk.Label(form, text="Cliente:").grid(row=0, column=0, sticky="e", pady=5)
         self.cliente_var = tk.StringVar()
-        tk.Entry(form, textvariable=self.cliente_var, width=35).grid(row=0, column=1, pady=5)
+        self.cliente_combo = ttk.Combobox(
+            form, textvariable=self.cliente_var, state="readonly", width=33, values=[],
+        )
+        self.cliente_combo.grid(row=0, column=1, pady=5)
 
         tk.Label(form, text="Data de entrega (DD/MM/AAAA):").grid(row=1, column=0, sticky="e", pady=5)
         self.data_var = tk.StringVar()
@@ -84,9 +87,14 @@ class SaidaEstoqueFrame(tk.Frame):
         self.pendentes = {}
         self.barcode_var.set("")
         self.status_label.config(text="", fg="red")
+        self._popular_clientes()
         self.cliente_var.set("")
         self.data_var.set(datetime.now().strftime("%d/%m/%Y"))
         self.refresh_tree()
+
+    def _popular_clientes(self):
+        clientes = sorted(storage.listar_clientes(), key=lambda c: (c["nome"].lower(), c["unidade"].lower()))
+        self.cliente_combo.config(values=[storage.nome_completo_cliente(c) for c in clientes])
 
     def refresh_tree(self):
         self.tree.delete(*self.tree.get_children())
@@ -188,7 +196,9 @@ class SaidaEstoqueFrame(tk.Frame):
         cliente = self.cliente_var.get().strip()
         data_entrega = self.data_var.get().strip()
         if not cliente:
-            messagebox.showwarning("Atenção", "Informe o cliente.")
+            messagebox.showwarning(
+                "Atenção", "Selecione o cliente. Cadastre clientes em 'Gerenciar Clientes' no menu principal.",
+            )
             return
         if not self._validar_data(data_entrega):
             messagebox.showwarning("Atenção", "Informe uma data válida no formato DD/MM/AAAA.")
