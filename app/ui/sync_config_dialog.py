@@ -11,6 +11,7 @@ class SyncConfigDialog(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.resultado_salvo = False
+        self._parent = parent
 
         self.title("Configurar Sincronização")
         self.resizable(False, False)
@@ -29,12 +30,13 @@ class SyncConfigDialog(tk.Toplevel):
 
         # Todo o restante do conteúdo fica dentro de um canvas rolável, para
         # o caso de a tela ser menor do que a altura natural do diálogo.
-        canvas = tk.Canvas(self, highlightthickness=0)
-        scrollbar = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        self._botoes = botoes
+        self._canvas = canvas = tk.Canvas(self, highlightthickness=0)
+        self._scrollbar = scrollbar = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=scrollbar.set)
 
-        conteudo = tk.Frame(canvas)
-        janela_conteudo = canvas.create_window((0, 0), window=conteudo, anchor="nw")
+        self._conteudo = conteudo = tk.Frame(canvas)
+        self._janela_conteudo = janela_conteudo = canvas.create_window((0, 0), window=conteudo, anchor="nw")
 
         def _atualizar_scrollregion(event=None):
             canvas.configure(scrollregion=canvas.bbox("all"))
@@ -104,7 +106,19 @@ class SyncConfigDialog(tk.Toplevel):
 
         self._atualizar_campos()
 
+        self.transient(parent)
+        self.grab_set()
+
+    def _ajustar_tamanho(self):
+        """Redimensiona a janela (e mostra/esconde a barra de rolagem) de
+        acordo com o conteúdo atualmente visível, sem nunca deixar os
+        botões Salvar/Cancelar fora da tela."""
+        canvas, scrollbar, conteudo, botoes = self._canvas, self._scrollbar, self._conteudo, self._botoes
+
+        canvas.pack_forget()
+        scrollbar.pack_forget()
         self.update_idletasks()
+
         largura = max(conteudo.winfo_reqwidth(), 480)
         altura_conteudo = conteudo.winfo_reqheight()
         altura_botoes = botoes.winfo_reqheight()
@@ -119,14 +133,12 @@ class SyncConfigDialog(tk.Toplevel):
         canvas.configure(width=largura, height=altura_canvas)
         canvas.pack(side="left", fill="both", expand=True)
 
+        parent = self._parent
         x = parent.winfo_rootx() + (parent.winfo_width() - largura) // 2
         y = parent.winfo_rooty() + (parent.winfo_height() - altura_janela) // 2
         x = max(0, min(x, tela_largura - largura))
         y = max(0, min(y, tela_altura - altura_janela))
         self.geometry(f"{largura}x{altura_janela}+{x}+{y}")
-
-        self.transient(parent)
-        self.grab_set()
 
     def _atualizar_campos(self):
         papel = self.papel_var.get()
@@ -138,6 +150,7 @@ class SyncConfigDialog(tk.Toplevel):
             self.frame_principal.grid()
         elif papel == sync_config.PAPEL_SECUNDARIA:
             self.frame_secundaria.grid()
+        self._ajustar_tamanho()
 
     def on_salvar(self, event=None):
         papel = self.papel_var.get()
