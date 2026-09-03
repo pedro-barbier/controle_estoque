@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
 from app import storage
+from app.ui.ui_utils import habilitar_busca_por_letra, manter_foco
 
 
 class SaidaEstoqueFrame(tk.Frame):
@@ -25,6 +26,10 @@ class SaidaEstoqueFrame(tk.Frame):
         self.barcode_entry = tk.Entry(barcode_frame, textvariable=self.barcode_var, width=30)
         self.barcode_entry.pack(side="left", padx=5)
         self.barcode_entry.bind("<Return>", self.on_barcode_submit)
+        manter_foco(
+            self.barcode_entry,
+            condicao=lambda: self.controller.current_frame_name == "SaidaEstoqueFrame" and not self.em_detalhes,
+        )
 
         self.status_label = tk.Label(self.scan_step, text="", fg="red")
         self.status_label.pack()
@@ -66,6 +71,7 @@ class SaidaEstoqueFrame(tk.Frame):
             form, textvariable=self.cliente_var, state="readonly", width=33, values=[],
         )
         self.cliente_combo.grid(row=0, column=1, pady=5)
+        habilitar_busca_por_letra(self.cliente_combo)
 
         tk.Label(form, text="Data de entrega (DD/MM/AAAA):").grid(row=1, column=0, sticky="e", pady=5)
         self.data_var = tk.StringVar()
@@ -156,6 +162,7 @@ class SaidaEstoqueFrame(tk.Frame):
         else:
             item["quantidade"] = nova_qtd
         self.refresh_tree()
+        self.barcode_entry.focus_set()
 
     def try_advance(self):
         if self.em_detalhes:
@@ -176,6 +183,7 @@ class SaidaEstoqueFrame(tk.Frame):
         if item["quantidade"] <= 0:
             del self.pendentes[codigo]
         self.refresh_tree()
+        self.barcode_entry.focus_set()
 
     def on_cancel_all(self):
         if not self.pendentes or messagebox.askyesno("Cancelar", "Descartar todos os itens lidos?"):

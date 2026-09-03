@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from app import storage
+from app.ui.ui_utils import habilitar_busca_por_letra
 
 COLUNAS_MOVIMENTOS = ("data_hora", "tipo", "codigo", "nome", "quantidade", "cliente", "data_entrega", "usuario")
 HEADERS_MOVIMENTOS = {
@@ -55,6 +56,7 @@ class VisualizarEstoqueFrame(tk.Frame):
         )
         self.cliente_combo.grid(row=0, column=3, padx=5, pady=3)
         self.cliente_combo.bind("<<ComboboxSelected>>", lambda e: self.aplicar_filtros())
+        habilitar_busca_por_letra(self.cliente_combo)
 
         tk.Label(filtro_frame, text="Data (DD/MM/AAAA):").grid(row=0, column=4, sticky="e", padx=5, pady=3)
         self.data_var = tk.StringVar()
@@ -69,6 +71,7 @@ class VisualizarEstoqueFrame(tk.Frame):
         )
         self.produto_combo.grid(row=0, column=7, padx=5, pady=3)
         self.produto_combo.bind("<<ComboboxSelected>>", lambda e: self.aplicar_filtros())
+        habilitar_busca_por_letra(self.produto_combo)
 
         self.quantidades_reais_var = tk.BooleanVar(value=False)
         tk.Checkbutton(

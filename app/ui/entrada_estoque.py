@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
 from app import storage
+from app.ui.ui_utils import manter_foco
 
 
 class EntradaEstoqueFrame(tk.Frame):
@@ -19,6 +20,10 @@ class EntradaEstoqueFrame(tk.Frame):
         self.barcode_entry = tk.Entry(barcode_frame, textvariable=self.barcode_var, width=30)
         self.barcode_entry.pack(side="left", padx=5)
         self.barcode_entry.bind("<Return>", self.on_barcode_submit)
+        manter_foco(
+            self.barcode_entry,
+            condicao=lambda: self.controller.current_frame_name == "EntradaEstoqueFrame",
+        )
 
         self.status_label = tk.Label(self, text="", fg="red")
         self.status_label.pack()
@@ -109,6 +114,7 @@ class EntradaEstoqueFrame(tk.Frame):
         else:
             item["quantidade"] = nova_qtd
         self.refresh_tree()
+        self.barcode_entry.focus_set()
 
     def try_advance(self):
         if self.pendentes:
@@ -127,6 +133,7 @@ class EntradaEstoqueFrame(tk.Frame):
         if item["quantidade"] <= 0:
             del self.pendentes[codigo]
         self.refresh_tree()
+        self.barcode_entry.focus_set()
 
     def on_cancel_all(self):
         if not self.pendentes or messagebox.askyesno("Cancelar", "Descartar todos os itens lidos?"):

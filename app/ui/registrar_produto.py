@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from app import storage
+from app.ui.ui_utils import habilitar_busca_por_letra
 
 
 ROTULOS_POR_UNIDADE = {
@@ -74,6 +75,7 @@ class RegistrarProdutoFrame(tk.Frame):
         )
         self.relacionado_combo.grid(row=4, column=1, pady=5)
         self.relacionado_combo.bind("<<ComboboxSelected>>", self._autopreencher_caixa)
+        habilitar_busca_por_letra(self.relacionado_combo)
         self.qtd_var.trace_add("write", self._autopreencher_caixa)
 
         btn_frame = tk.Frame(self.form_frame)
