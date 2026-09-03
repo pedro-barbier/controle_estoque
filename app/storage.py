@@ -1,7 +1,10 @@
 """Leitura e escrita dos dados da aplicação em arquivos CSV separados."""
 
 import csv
+import hashlib
+import hmac
 import os
+import secrets
 import sys
 from datetime import datetime
 
@@ -19,13 +22,21 @@ PRODUTOS_CSV = os.path.join(DATA_DIR, "produtos.csv")
 ENTRADAS_CSV = os.path.join(DATA_DIR, "entradas_estoque.csv")
 SAIDAS_CSV = os.path.join(DATA_DIR, "saidas_estoque.csv")
 CLIENTES_CSV = os.path.join(DATA_DIR, "clientes.csv")
+USUARIOS_CSV = os.path.join(DATA_DIR, "usuarios.csv")
 
 PRODUTOS_HEADERS = [
     "codigo_barras", "nome", "valor", "unidade_medida", "e_caixa", "quantidade_pacotes", "produto_relacionado",
 ]
-ENTRADAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade"]
-SAIDAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade", "cliente", "data_entrega"]
+ENTRADAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade", "usuario"]
+SAIDAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade", "cliente", "data_entrega", "usuario"]
 CLIENTES_HEADERS = ["id", "nome", "unidade"]
+USUARIOS_HEADERS = ["usuario", "senha_hash", "salt"]
+
+_USUARIOS_INICIAIS = [
+    ("Jussara", "@porto498015"),
+    ("Sarah", "S152489"),
+    ("Pedro", "#200089pHB"),
+]
 
 
 def _ensure_csv(path, headers):
@@ -57,12 +68,75 @@ def _migrar_produtos_csv():
             writer.writerow(nova)
 
 
+def _migrar_csv_movimento(path, headers):
+    """Adiciona a coluna 'usuario' a um entradas/saidas CSV de versão anterior.
+
+    Linhas gravadas antes da existência do login não têm autor conhecido, e
+    recebem o marcador "desconhecido" em vez de ficarem em branco.
+    """
+    if not os.path.exists(path):
+        return
+    with open(path, newline="", encoding="utf-8") as f:
+        header = next(csv.reader(f), None)
+    if header == headers:
+        return
+    with open(path, newline="", encoding="utf-8") as f:
+        linhas = list(csv.DictReader(f, restval=""))
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for linha in linhas:
+            nova = {campo: linha.get(campo, "") for campo in headers}
+            if not nova.get("usuario"):
+                nova["usuario"] = "desconhecido"
+            writer.writerow(nova)
+
+
+def _hash_senha(senha, salt):
+    return hashlib.sha256(f"{salt}{senha}".encode("utf-8")).hexdigest()
+
+
+def _seed_usuarios_iniciais():
+    with open(USUARIOS_CSV, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        for usuario, senha in _USUARIOS_INICIAIS:
+            salt = secrets.token_hex(16)
+            writer.writerow([usuario, _hash_senha(senha, salt), salt])
+
+
 def ensure_files():
     _ensure_csv(PRODUTOS_CSV, PRODUTOS_HEADERS)
     _migrar_produtos_csv()
+
+    usuarios_novo = not os.path.exists(USUARIOS_CSV)
+    _ensure_csv(USUARIOS_CSV, USUARIOS_HEADERS)
+    if usuarios_novo:
+        _seed_usuarios_iniciais()
+
     _ensure_csv(ENTRADAS_CSV, ENTRADAS_HEADERS)
+    _migrar_csv_movimento(ENTRADAS_CSV, ENTRADAS_HEADERS)
     _ensure_csv(SAIDAS_CSV, SAIDAS_HEADERS)
+    _migrar_csv_movimento(SAIDAS_CSV, SAIDAS_HEADERS)
     _ensure_csv(CLIENTES_CSV, CLIENTES_HEADERS)
+
+
+def listar_usuarios():
+    ensure_files()
+    with open(USUARIOS_CSV, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def verificar_login(usuario, senha):
+    """Retorna o nome de usuário canônico (como gravado no CSV) em caso de
+    sucesso, ou None se usuário/senha inválidos."""
+    usuario_norm = (usuario or "").strip().lower()
+    for u in listar_usuarios():
+        if u["usuario"].strip().lower() == usuario_norm:
+            calculado = _hash_senha(senha, u["salt"])
+            if hmac.compare_digest(calculado, u["senha_hash"]):
+                return u["usuario"]
+            return None
+    return None
 
 
 def listar_produtos():
@@ -208,17 +282,17 @@ def resetar_estoque():
         csv.writer(f).writerow(SAIDAS_HEADERS)
 
 
-def registrar_entrada(itens):
+def registrar_entrada(itens, usuario):
     """itens: lista de dicts com codigo_barras, nome, quantidade."""
     ensure_files()
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(ENTRADAS_CSV, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         for item in itens:
-            writer.writerow([agora, item["codigo_barras"], item["nome"], item["quantidade"]])
+            writer.writerow([agora, item["codigo_barras"], item["nome"], item["quantidade"], usuario])
 
 
-def registrar_saida(itens, cliente, data_entrega):
+def registrar_saida(itens, cliente, data_entrega, usuario):
     """itens: lista de dicts com codigo_barras, nome, quantidade."""
     ensure_files()
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -226,7 +300,7 @@ def registrar_saida(itens, cliente, data_entrega):
         writer = csv.writer(f)
         for item in itens:
             writer.writerow([
-                agora, item["codigo_barras"], item["nome"], item["quantidade"], cliente, data_entrega
+                agora, item["codigo_barras"], item["nome"], item["quantidade"], cliente, data_entrega, usuario
             ])
 
 
@@ -254,6 +328,7 @@ def listar_movimentos():
             "quantidade": item["quantidade"],
             "cliente": "",
             "data_entrega": "",
+            "usuario": item.get("usuario", ""),
         })
     for item in listar_saidas():
         movimentos.append({
@@ -264,6 +339,7 @@ def listar_movimentos():
             "quantidade": item["quantidade"],
             "cliente": item["cliente"],
             "data_entrega": item["data_entrega"],
+            "usuario": item.get("usuario", ""),
         })
     movimentos.sort(key=lambda m: m["data_hora"], reverse=True)
     return movimentos

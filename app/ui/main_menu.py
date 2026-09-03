@@ -10,7 +10,13 @@ class MainMenu(tk.Frame):
         self.controller = controller
 
         title_font = tkfont.Font(size=18, weight="bold")
-        tk.Label(self, text="Controle de Estoque - Porto dos Cafés", font=title_font).pack(pady=30)
+        tk.Label(self, text="Controle de Estoque - Porto dos Cafés", font=title_font).pack(pady=(30, 5))
+
+        status_frame = tk.Frame(self)
+        status_frame.pack(pady=(0, 15))
+        self.usuario_label = tk.Label(status_frame, text="", fg="gray")
+        self.usuario_label.pack(side="left", padx=(0, 10))
+        tk.Button(status_frame, text="Trocar Usuário", command=self.on_trocar_usuario).pack(side="left")
 
         btn_font = tkfont.Font(size=12)
         botoes = [
@@ -35,7 +41,24 @@ class MainMenu(tk.Frame):
 
         tk.Button(self, text="Sair", command=controller.destroy).pack(pady=20)
 
+    def on_show(self):
+        self._atualizar_status_usuario()
+
+    def _atualizar_status_usuario(self):
+        nome = self.controller.usuario_logado
+        texto = f"Usuário logado: {nome}" if nome else "Nenhum usuário logado"
+        self.usuario_label.config(text=texto)
+
+    def on_trocar_usuario(self):
+        self.controller.usuario_logado = None
+        self._atualizar_status_usuario()
+        messagebox.showinfo(
+            "Usuário", "Sessão encerrada. Um novo login será pedido na próxima ação que exigir usuário."
+        )
+
     def on_reset_estoque(self):
+        if not self.controller.require_login():
+            return
         if not messagebox.askyesno(
             "Resetar Estoque",
             "Isso vai apagar TODO o histórico de entradas e saídas do estoque "

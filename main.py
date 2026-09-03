@@ -3,11 +3,20 @@ import tkinter as tk
 from app import storage
 from app.ui.clientes import ClientesFrame
 from app.ui.entrada_estoque import EntradaEstoqueFrame
+from app.ui.login_dialog import LoginDialog
 from app.ui.main_menu import MainMenu
 from app.ui.remover_produto import RemoverProdutoFrame
 from app.ui.registrar_produto import RegistrarProdutoFrame
 from app.ui.saida_estoque import SaidaEstoqueFrame
 from app.ui.visualizar_estoque import VisualizarEstoqueFrame
+
+PROTECTED_FRAMES = {
+    "RegistrarProdutoFrame",
+    "RemoverProdutoFrame",
+    "ClientesFrame",
+    "EntradaEstoqueFrame",
+    "SaidaEstoqueFrame",
+}
 
 
 class App(tk.Tk):
@@ -37,17 +46,35 @@ class App(tk.Tk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         self.current_frame_name = None
+        self.usuario_logado = None
         self.bind("<Escape>", self.on_global_escape)
         self.bind("<Return>", self.on_global_enter)
 
         self.show_frame("MainMenu")
 
     def show_frame(self, name):
+        if name in PROTECTED_FRAMES and not self.require_login():
+            return
         self.current_frame_name = name
         frame = self.frames[name]
         if hasattr(frame, "on_show"):
             frame.on_show()
         frame.tkraise()
+
+    def require_login(self):
+        """Garante que há um usuário logado, pedindo login se necessário.
+
+        Retorna True se já havia (ou passou a haver) um usuário autenticado,
+        False se o login foi cancelado ou falhou.
+        """
+        if self.usuario_logado:
+            return True
+        dialog = LoginDialog(self)
+        self.wait_window(dialog)
+        if dialog.resultado:
+            self.usuario_logado = dialog.resultado
+            return True
+        return False
 
     def on_global_escape(self, event=None):
         """Esc volta ao menu principal, confirmando antes se houver algo em andamento."""

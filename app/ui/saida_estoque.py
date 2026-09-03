@@ -204,7 +204,7 @@ class SaidaEstoqueFrame(tk.Frame):
             messagebox.showwarning("Atenção", "Informe uma data válida no formato DD/MM/AAAA.")
             return
         itens = storage.expandir_itens_pendentes(self.pendentes)
-        storage.registrar_saida(itens, cliente, data_entrega)
+        storage.registrar_saida(itens, cliente, data_entrega, self.controller.usuario_logado)
         messagebox.showinfo("Sucesso", "Saída registrada com sucesso.")
         self.reset()
         self.show_scan_step()

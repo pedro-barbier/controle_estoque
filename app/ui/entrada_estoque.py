@@ -138,7 +138,7 @@ class EntradaEstoqueFrame(tk.Frame):
             messagebox.showwarning("Atenção", "Nenhum produto lido.")
             return
         itens = storage.expandir_itens_pendentes(self.pendentes)
-        storage.registrar_entrada(itens)
+        storage.registrar_entrada(itens, self.controller.usuario_logado)
         messagebox.showinfo("Sucesso", "Produtos adicionados ao estoque.")
         self.reset()
         self.barcode_entry.focus_set()

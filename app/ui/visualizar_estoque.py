@@ -5,7 +5,7 @@ from tkinter import ttk
 
 from app import storage
 
-COLUNAS_MOVIMENTOS = ("data_hora", "tipo", "codigo", "nome", "quantidade", "cliente", "data_entrega")
+COLUNAS_MOVIMENTOS = ("data_hora", "tipo", "codigo", "nome", "quantidade", "cliente", "data_entrega", "usuario")
 HEADERS_MOVIMENTOS = {
     "data_hora": "Data/Hora",
     "tipo": "Tipo",
@@ -14,10 +14,11 @@ HEADERS_MOVIMENTOS = {
     "quantidade": "Qtd.",
     "cliente": "Cliente",
     "data_entrega": "Entrega",
+    "usuario": "Usuário",
 }
 WIDTHS_MOVIMENTOS = {
     "data_hora": 130, "tipo": 70, "codigo": 110, "nome": 200,
-    "quantidade": 55, "cliente": 130, "data_entrega": 90,
+    "quantidade": 55, "cliente": 130, "data_entrega": 90, "usuario": 100,
 }
 
 COLUNAS_REAIS = ("codigo", "nome", "quantidade")
@@ -170,6 +171,7 @@ class VisualizarEstoqueFrame(tk.Frame):
                 m["quantidade"],
                 m["cliente"],
                 m["data_entrega"],
+                m["usuario"],
             ))
 
     def _mostrar_quantidades_reais(self):
