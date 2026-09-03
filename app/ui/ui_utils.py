@@ -32,16 +32,34 @@ def manter_foco(entry, condicao=None):
 def habilitar_busca_por_letra(combo):
     """Ao digitar uma letra num combobox somente-leitura, pula para o primeiro
     valor que começa com essa letra — facilita achar um cliente/produto numa
-    lista longa sem precisar rolar manualmente."""
-    def _ao_digitar(event):
-        char = event.char
+    lista longa sem precisar rolar manualmente. Funciona tanto com a lista
+    fechada quanto aberta."""
+    def _processar(char):
         if not char or not char.isalnum():
-            return
+            return None
         alvo = char.lower()
         for indice, valor in enumerate(combo.cget("values")):
             if valor.lower().startswith(alvo):
                 combo.current(indice)
                 combo.event_generate("<<ComboboxSelected>>")
+                try:
+                    combo.tk.eval(f"ttk::combobox::Unpost {combo}")
+                except tk.TclError:
+                    pass
                 break
         return "break"
-    combo.bind("<KeyPress>", _ao_digitar)
+
+    combo.bind("<KeyPress>", lambda event: _processar(event.char))
+
+    # Enquanto a lista está aberta, o teclado vai para a listbox interna do
+    # "popdown" — uma janela Tcl separada, criada por baixo dos panos pelo
+    # ttk (fora do controle do Tkinter em Python), então precisa de um bind
+    # em Tcl "cru" (via .register + tk.call) apontando direto pro caminho
+    # dela, senão digitar uma letra com a lista aberta não tem efeito nenhum.
+    try:
+        popdown = combo.tk.eval(f"ttk::combobox::PopdownWindow {combo}")
+        listbox_path = f"{popdown}.f.l"
+        funcid = combo.register(_processar)
+        combo.tk.call("bind", listbox_path, "<KeyPress>", f'if {{"[{funcid} %A]" == "break"}} break')
+    except tk.TclError:
+        pass
