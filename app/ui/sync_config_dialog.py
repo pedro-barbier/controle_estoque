@@ -19,12 +19,38 @@ class SyncConfigDialog(tk.Toplevel):
 
         config = sync_config.carregar()
 
+        # Botões ficam num frame próprio, fixado embaixo da janela (fora da
+        # área rolável), para nunca ficarem cortados em telas pequenas.
+        botoes = tk.Frame(self)
+        botoes.pack(side="bottom", fill="x", pady=20)
+        tk.Button(botoes, text="Salvar", width=10, command=self.on_salvar).pack(side="left", padx=(0, 5))
+        tk.Button(botoes, text="Cancelar", width=10, command=self.on_cancel).pack(side="left", padx=(5, 0))
+        botoes.pack_configure(anchor="center")
+
+        # Todo o restante do conteúdo fica dentro de um canvas rolável, para
+        # o caso de a tela ser menor do que a altura natural do diálogo.
+        canvas = tk.Canvas(self, highlightthickness=0)
+        scrollbar = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        conteudo = tk.Frame(canvas)
+        janela_conteudo = canvas.create_window((0, 0), window=conteudo, anchor="nw")
+
+        def _atualizar_scrollregion(event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _ajustar_largura_conteudo(event):
+            canvas.itemconfigure(janela_conteudo, width=event.width)
+
+        conteudo.bind("<Configure>", _atualizar_scrollregion)
+        canvas.bind("<Configure>", _ajustar_largura_conteudo)
+
         title_font = tkfont.Font(size=13, weight="bold")
-        tk.Label(self, text="Sincronização entre máquinas", font=title_font).grid(
+        tk.Label(conteudo, text="Sincronização entre máquinas", font=title_font).grid(
             row=0, column=0, columnspan=2, padx=20, pady=(20, 5)
         )
         tk.Label(
-            self,
+            conteudo,
             text="Todas as máquinas precisam estar na mesma rede wifi.",
             fg="gray",
         ).grid(row=1, column=0, columnspan=2, padx=20, pady=(0, 15))
@@ -38,11 +64,11 @@ class SyncConfigDialog(tk.Toplevel):
         linha = 2
         for valor, texto in opcoes:
             tk.Radiobutton(
-                self, text=texto, variable=self.papel_var, value=valor, command=self._atualizar_campos,
+                conteudo, text=texto, variable=self.papel_var, value=valor, command=self._atualizar_campos,
             ).grid(row=linha, column=0, columnspan=2, sticky="w", padx=20)
             linha += 1
 
-        self.frame_principal = tk.Frame(self)
+        self.frame_principal = tk.Frame(conteudo)
         tk.Label(self.frame_principal, text="Porta do servidor:").grid(row=0, column=0, sticky="e", padx=(0, 5))
         self.porta_servidor_var = tk.StringVar(value=str(config["porta_servidor"]))
         tk.Entry(self.frame_principal, textvariable=self.porta_servidor_var, width=10).grid(
@@ -51,7 +77,7 @@ class SyncConfigDialog(tk.Toplevel):
         self.ip_local_label = tk.Label(self.frame_principal, text="", fg="gray")
         self.ip_local_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
-        self.frame_secundaria = tk.Frame(self)
+        self.frame_secundaria = tk.Frame(conteudo)
         tk.Label(self.frame_secundaria, text="IP da máquina principal:").grid(row=0, column=0, sticky="e", padx=(0, 5))
         self.principal_ip_var = tk.StringVar(value=config["principal_ip"])
         tk.Entry(self.frame_secundaria, textvariable=self.principal_ip_var, width=16).grid(row=0, column=1, sticky="w")
@@ -72,26 +98,32 @@ class SyncConfigDialog(tk.Toplevel):
         self.frame_secundaria.grid(row=linha, column=0, columnspan=2, padx=20, pady=(10, 0), sticky="w")
         linha += 1
 
-        self.status_label = tk.Label(self, text="", fg="red")
-        self.status_label.grid(row=linha, column=0, columnspan=2, pady=(10, 0))
+        self.status_label = tk.Label(conteudo, text="", fg="red")
+        self.status_label.grid(row=linha, column=0, columnspan=2, pady=(10, 20))
         linha += 1
-
-        botoes = tk.Frame(self)
-        botoes.grid(row=linha, column=0, columnspan=2, pady=20)
-        tk.Button(botoes, text="Salvar", width=10, command=self.on_salvar).pack(side="left", padx=5)
-        tk.Button(botoes, text="Cancelar", width=10, command=self.on_cancel).pack(side="left", padx=5)
 
         self._atualizar_campos()
 
         self.update_idletasks()
-        largura, altura = max(self.winfo_reqwidth(), 480), self.winfo_reqheight()
+        largura = max(conteudo.winfo_reqwidth(), 480)
+        altura_conteudo = conteudo.winfo_reqheight()
+        altura_botoes = botoes.winfo_reqheight()
         tela_largura, tela_altura = self.winfo_screenwidth(), self.winfo_screenheight()
-        altura = min(altura, tela_altura - 40)
+
+        altura_maxima_janela = tela_altura - 60
+        altura_janela = min(altura_conteudo + altura_botoes, altura_maxima_janela)
+        altura_canvas = altura_janela - altura_botoes
+
+        if altura_conteudo > altura_canvas:
+            scrollbar.pack(side="right", fill="y")
+        canvas.configure(width=largura, height=altura_canvas)
+        canvas.pack(side="left", fill="both", expand=True)
+
         x = parent.winfo_rootx() + (parent.winfo_width() - largura) // 2
-        y = parent.winfo_rooty() + (parent.winfo_height() - altura) // 2
+        y = parent.winfo_rooty() + (parent.winfo_height() - altura_janela) // 2
         x = max(0, min(x, tela_largura - largura))
-        y = max(0, min(y, tela_altura - altura))
-        self.geometry(f"{largura}x{altura}+{x}+{y}")
+        y = max(0, min(y, tela_altura - altura_janela))
+        self.geometry(f"{largura}x{altura_janela}+{x}+{y}")
 
         self.transient(parent)
         self.grab_set()
