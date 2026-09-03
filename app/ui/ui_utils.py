@@ -33,7 +33,28 @@ def habilitar_busca_por_letra(combo):
     """Ao digitar uma letra num combobox somente-leitura, pula para o primeiro
     valor que começa com essa letra — facilita achar um cliente/produto numa
     lista longa sem precisar rolar manualmente. Funciona tanto com a lista
-    fechada quanto aberta."""
+    fechada quanto aberta; se estiver aberta, ela continua aberta (só a
+    seleção pula), para o usuário poder digitar mais letras ou navegar."""
+    popdown_listbox_path = {"caminho": None}
+
+    def _sincronizar_listbox_aberta(indice):
+        """Atualiza o destaque/scroll da listbox do popdown, se estiver aberta,
+        para refletir visualmente o novo valor selecionado."""
+        listbox_path = popdown_listbox_path["caminho"]
+        if not listbox_path:
+            return
+        try:
+            if not combo.tk.getboolean(combo.tk.eval(f"winfo ismapped {listbox_path}")):
+                return
+            combo.tk.eval(
+                f"{listbox_path} selection clear 0 end; "
+                f"{listbox_path} selection set {indice}; "
+                f"{listbox_path} activate {indice}; "
+                f"{listbox_path} see {indice}"
+            )
+        except tk.TclError:
+            pass
+
     def _processar(char):
         if not char or not char.isalnum():
             return None
@@ -42,10 +63,7 @@ def habilitar_busca_por_letra(combo):
             if valor.lower().startswith(alvo):
                 combo.current(indice)
                 combo.event_generate("<<ComboboxSelected>>")
-                try:
-                    combo.tk.eval(f"ttk::combobox::Unpost {combo}")
-                except tk.TclError:
-                    pass
+                _sincronizar_listbox_aberta(indice)
                 break
         return "break"
 
@@ -59,6 +77,7 @@ def habilitar_busca_por_letra(combo):
     try:
         popdown = combo.tk.eval(f"ttk::combobox::PopdownWindow {combo}")
         listbox_path = f"{popdown}.f.l"
+        popdown_listbox_path["caminho"] = listbox_path
         funcid = combo.register(_processar)
         combo.tk.call("bind", listbox_path, "<KeyPress>", f'if {{"[{funcid} %A]" == "break"}} break')
     except tk.TclError:
