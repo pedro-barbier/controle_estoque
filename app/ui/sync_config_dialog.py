@@ -84,7 +84,7 @@ class SyncConfigDialog(tk.Toplevel):
         self._atualizar_campos()
 
         self.update_idletasks()
-        largura, altura = self.winfo_reqwidth(), self.winfo_reqheight()
+        largura, altura = max(self.winfo_reqwidth(), 480), self.winfo_reqheight()
         tela_largura, tela_altura = self.winfo_screenwidth(), self.winfo_screenheight()
         altura = min(altura, tela_altura - 40)
         x = parent.winfo_rootx() + (parent.winfo_width() - largura) // 2
