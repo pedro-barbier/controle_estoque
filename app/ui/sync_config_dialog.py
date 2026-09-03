@@ -85,8 +85,12 @@ class SyncConfigDialog(tk.Toplevel):
 
         self.update_idletasks()
         largura, altura = self.winfo_reqwidth(), self.winfo_reqheight()
+        tela_largura, tela_altura = self.winfo_screenwidth(), self.winfo_screenheight()
+        altura = min(altura, tela_altura - 40)
         x = parent.winfo_rootx() + (parent.winfo_width() - largura) // 2
         y = parent.winfo_rooty() + (parent.winfo_height() - altura) // 2
+        x = max(0, min(x, tela_largura - largura))
+        y = max(0, min(y, tela_altura - altura))
         self.geometry(f"{largura}x{altura}+{x}+{y}")
 
         self.transient(parent)
