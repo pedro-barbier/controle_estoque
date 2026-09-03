@@ -1,6 +1,6 @@
 import tkinter as tk
 
-from app import storage
+from app import storage, sync, sync_config
 from app.ui.clientes import ClientesFrame
 from app.ui.entrada_estoque import EntradaEstoqueFrame
 from app.ui.login_dialog import LoginDialog
@@ -91,6 +91,27 @@ class App(tk.Tk):
             frame.try_advance()
 
 
+def _sincronizar_silenciosamente():
+    """Sincroniza com a máquina principal, se esta máquina for secundária. Chamado ao
+    abrir e ao fechar o app; falhas (ex.: principal offline) não bloqueiam o uso do app."""
+    config = sync_config.carregar()
+    if config["papel"] != sync_config.PAPEL_SECUNDARIA:
+        return
+    try:
+        sync.sincronizar_e_registrar(config["principal_ip"], config["principal_porta"])
+    except sync.ErroSincronizacao:
+        pass
+
+
 if __name__ == "__main__":
     storage.ensure_files()
-    App().mainloop()
+
+    _config_sync = sync_config.carregar()
+    if _config_sync["papel"] == sync_config.PAPEL_PRINCIPAL:
+        sync.iniciar_servidor(_config_sync["porta_servidor"])
+    else:
+        _sincronizar_silenciosamente()
+
+    app = App()
+    app.protocol("WM_DELETE_WINDOW", lambda: (_sincronizar_silenciosamente(), app.destroy()))
+    app.mainloop()

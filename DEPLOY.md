@@ -78,6 +78,53 @@ pelo PyInstaller às vezes são sinalizados por falso-positivo (comum em
 antivírus mais agressivos). Adicione uma exceção para a pasta
 `C:\ControleEstoqueCafe\` no antivírus.
 
+## 6. Sincronizando várias máquinas pelo wifi da loja
+
+O programa suporta ter uma máquina **Principal** (onde as entradas/saídas de
+estoque são registradas) e outras máquinas **Secundárias** na mesma rede
+wifi, usadas para visualizar/conferir o estoque e também podem registrar
+lançamentos, que são enviados para a principal ao sincronizar.
+
+Isso é opcional — se a loja usa só uma máquina, não precisa configurar nada
+(fica no modo padrão "Não sincronizar").
+
+### Na máquina Principal
+
+1. Abra o programa, clique em **Configurar Sincronização** (pede login).
+2. Selecione **Principal** e confirme a porta (padrão `8765` — só mude se
+   já usar essa porta para outra coisa).
+3. Anote o **IP desta máquina**, mostrado na tela (algo como
+   `192.168.15.48`) — vai ser usado para configurar as secundárias.
+4. Salve e reinicie o programa.
+5. Na primeira vez, o **Firewall do Windows** deve perguntar se permite o
+   programa receber conexões na rede — clique em **Permitir acesso**
+   (redes privadas/domésticas). Se isso for negado sem querer, as
+   secundárias não conseguem sincronizar; para corrigir, procure
+   "Permitir um aplicativo pelo Firewall do Windows" no menu Iniciar e
+   marque o `ControleEstoqueCafe.exe`.
+
+### Em cada máquina Secundária
+
+1. Abra o programa, clique em **Configurar Sincronização** (pede login).
+2. Selecione **Secundária**.
+3. Informe o **IP da máquina principal** (anotado no passo acima) e a
+   porta (`8765`, se não foi trocada).
+4. Opcionalmente, dê um nome a essa máquina (ex.: "Caixa 2") — aparece no
+   histórico de movimentações para identificar de onde veio cada
+   lançamento.
+5. Salve e reinicie o programa.
+
+A partir daí, cada máquina secundária sincroniza automaticamente ao abrir e
+ao fechar o programa, e também a qualquer momento pelo botão
+**Sincronizar Agora** no menu principal. Se a máquina principal estiver
+desligada ou fora da rede no momento, a sincronização falha silenciosamente
+(ou mostra o erro, se veio do botão) e o programa continua funcionando
+normalmente com os dados que já tinha — nada é perdido, só fica pendente de
+envio até a próxima sincronização bem-sucedida.
+
+**Importante:** todas as máquinas precisam estar na mesma rede wifi/local
+para se enxergarem. Isso não funciona pela internet.
+
 ## Testando no Linux (opcional, só para desenvolvimento)
 
 `build_linux.sh` gera um executável equivalente para Linux — útil para

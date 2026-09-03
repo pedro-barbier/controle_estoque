@@ -1,9 +1,10 @@
 """Leitura e escrita dos dados da aplicação em um banco SQLite local (data/estoque.db)."""
 
 import hmac
+import uuid as uuid_lib
 from datetime import datetime
 
-from app import db
+from app import db, sync_config
 
 
 def ensure_files():
@@ -189,10 +190,15 @@ def registrar_entrada(itens, usuario):
     ensure_files()
     conn = db.get_connection()
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    origem = sync_config.nome_desta_maquina()
+    sincronizado = 0 if sync_config.carregar()["papel"] == sync_config.PAPEL_SECUNDARIA else 1
     for item in itens:
         conn.execute(
-            "INSERT INTO entradas (data_hora, codigo_barras, nome, quantidade, usuario) VALUES (?, ?, ?, ?, ?)",
-            (agora, item["codigo_barras"], item["nome"], item["quantidade"], usuario),
+            "INSERT INTO entradas "
+            "(uuid, data_hora, codigo_barras, nome, quantidade, usuario, origem, sincronizado) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (uuid_lib.uuid4().hex, agora, item["codigo_barras"], item["nome"], item["quantidade"],
+             usuario, origem, sincronizado),
         )
     conn.commit()
 
@@ -202,12 +208,15 @@ def registrar_saida(itens, cliente, data_entrega, usuario):
     ensure_files()
     conn = db.get_connection()
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    origem = sync_config.nome_desta_maquina()
+    sincronizado = 0 if sync_config.carregar()["papel"] == sync_config.PAPEL_SECUNDARIA else 1
     for item in itens:
         conn.execute(
             "INSERT INTO saidas "
-            "(data_hora, codigo_barras, nome, quantidade, cliente, data_entrega, usuario) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (agora, item["codigo_barras"], item["nome"], item["quantidade"], cliente, data_entrega, usuario),
+            "(uuid, data_hora, codigo_barras, nome, quantidade, cliente, data_entrega, usuario, origem, sincronizado) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (uuid_lib.uuid4().hex, agora, item["codigo_barras"], item["nome"], item["quantidade"],
+             cliente, data_entrega, usuario, origem, sincronizado),
         )
     conn.commit()
 
@@ -294,3 +303,168 @@ def calcular_quantidades_reais():
     ]
     resultado.sort(key=lambda r: r["nome"].lower())
     return resultado
+
+
+# --- Protocolo de sincronização entre máquinas (ver app/sync.py) ---------
+
+def _produto_row_to_sync_dict(row):
+    return {
+        "codigo_barras": row["codigo_barras"],
+        "nome": row["nome"],
+        "valor": row["valor"],
+        "unidade_medida": row["unidade_medida"],
+        "e_caixa": row["e_caixa"],
+        "quantidade_pacotes": row["quantidade_pacotes"],
+        "produto_relacionado": row["produto_relacionado"],
+    }
+
+
+def _entrada_row_to_sync_dict(row):
+    return {
+        "uuid": row["uuid"],
+        "data_hora": row["data_hora"],
+        "codigo_barras": row["codigo_barras"],
+        "nome": row["nome"],
+        "quantidade": row["quantidade"],
+        "usuario": row["usuario"],
+        "origem": row["origem"],
+    }
+
+
+def _saida_row_to_sync_dict(row):
+    return {
+        "uuid": row["uuid"],
+        "data_hora": row["data_hora"],
+        "codigo_barras": row["codigo_barras"],
+        "nome": row["nome"],
+        "quantidade": row["quantidade"],
+        "cliente": row["cliente"],
+        "data_entrega": row["data_entrega"],
+        "usuario": row["usuario"],
+        "origem": row["origem"],
+    }
+
+
+def dados_para_sincronizacao():
+    """Todo o conteúdo do banco no formato do protocolo de sincronização (lado principal, GET /sync/full)."""
+    ensure_files()
+    conn = db.get_connection()
+    return {
+        "produtos": [_produto_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM produtos")],
+        "clientes": [dict(r) for r in conn.execute("SELECT id, nome, unidade FROM clientes")],
+        "usuarios": [dict(r) for r in conn.execute("SELECT usuario, senha_hash, salt FROM usuarios")],
+        "entradas": [_entrada_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM entradas")],
+        "saidas": [_saida_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM saidas")],
+    }
+
+
+def movimentos_pendentes():
+    """Entradas/saídas criadas localmente ainda não enviadas à principal (lado secundária, antes do POST /sync/push)."""
+    ensure_files()
+    conn = db.get_connection()
+    return {
+        "entradas": [
+            _entrada_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM entradas WHERE sincronizado = 0")
+        ],
+        "saidas": [
+            _saida_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM saidas WHERE sincronizado = 0")
+        ],
+    }
+
+
+def registrar_movimentos_recebidos(entradas, saidas):
+    """Insere movimentações recebidas de uma máquina secundária (lado principal, POST /sync/push).
+
+    Idempotente: uma movimentação com um uuid já conhecido é ignorada — a
+    máquina secundária reenvia tudo que ainda não confirmou como recebido,
+    então o mesmo lote pode chegar mais de uma vez (ex.: se a conexão cair
+    depois do envio mas antes da secundária terminar de processar a resposta).
+    """
+    ensure_files()
+    conn = db.get_connection()
+    antes_entradas = conn.execute("SELECT COUNT(*) FROM entradas").fetchone()[0]
+    antes_saidas = conn.execute("SELECT COUNT(*) FROM saidas").fetchone()[0]
+    for item in entradas:
+        conn.execute(
+            "INSERT OR IGNORE INTO entradas "
+            "(uuid, data_hora, codigo_barras, nome, quantidade, usuario, origem, sincronizado) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+            (item["uuid"], item["data_hora"], item["codigo_barras"], item["nome"],
+             int(item["quantidade"]), item["usuario"], item.get("origem", "")),
+        )
+    for item in saidas:
+        conn.execute(
+            "INSERT OR IGNORE INTO saidas "
+            "(uuid, data_hora, codigo_barras, nome, quantidade, cliente, data_entrega, usuario, origem, sincronizado) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+            (item["uuid"], item["data_hora"], item["codigo_barras"], item["nome"], int(item["quantidade"]),
+             item.get("cliente", ""), item.get("data_entrega", ""), item["usuario"], item.get("origem", "")),
+        )
+    conn.commit()
+    depois_entradas = conn.execute("SELECT COUNT(*) FROM entradas").fetchone()[0]
+    depois_saidas = conn.execute("SELECT COUNT(*) FROM saidas").fetchone()[0]
+    return {
+        "entradas_recebidas": depois_entradas - antes_entradas,
+        "saidas_recebidas": depois_saidas - antes_saidas,
+    }
+
+
+def aplicar_dados_sincronizados(dados):
+    """Substitui produtos/clientes/usuarios/entradas/saidas locais pelos dados vindos da máquina
+    principal (lado secundária, depois do GET /sync/full).
+
+    A substituição é total nas 5 tabelas. Isso só é seguro porque é sempre
+    chamada depois que `movimentos_pendentes()` já foi enviado com sucesso à
+    principal (ver `sync.sincronizar`): tudo que existia só localmente já está
+    representado no retorno da principal, então não há risco de perder
+    movimentações criadas nesta máquina.
+    """
+    ensure_files()
+    conn = db.get_connection()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("DELETE FROM produtos")
+        for p in dados.get("produtos", []):
+            conn.execute(
+                "INSERT INTO produtos "
+                "(codigo_barras, nome, valor, unidade_medida, e_caixa, quantidade_pacotes, produto_relacionado) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (p["codigo_barras"], p["nome"], p["valor"], p["unidade_medida"], p["e_caixa"],
+                 p["quantidade_pacotes"], p["produto_relacionado"]),
+            )
+
+        conn.execute("DELETE FROM clientes")
+        for c in dados.get("clientes", []):
+            conn.execute(
+                "INSERT INTO clientes (id, nome, unidade) VALUES (?, ?, ?)", (c["id"], c["nome"], c["unidade"])
+            )
+
+        conn.execute("DELETE FROM usuarios")
+        for u in dados.get("usuarios", []):
+            conn.execute(
+                "INSERT INTO usuarios (usuario, senha_hash, salt) VALUES (?, ?, ?)",
+                (u["usuario"], u["senha_hash"], u["salt"]),
+            )
+
+        conn.execute("DELETE FROM entradas")
+        for e in dados.get("entradas", []):
+            conn.execute(
+                "INSERT INTO entradas (uuid, data_hora, codigo_barras, nome, quantidade, usuario, origem, sincronizado) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+                (e["uuid"], e["data_hora"], e["codigo_barras"], e["nome"], e["quantidade"], e["usuario"],
+                 e.get("origem", "")),
+            )
+
+        conn.execute("DELETE FROM saidas")
+        for s in dados.get("saidas", []):
+            conn.execute(
+                "INSERT INTO saidas "
+                "(uuid, data_hora, codigo_barras, nome, quantidade, cliente, data_entrega, usuario, origem, sincronizado) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                (s["uuid"], s["data_hora"], s["codigo_barras"], s["nome"], s["quantidade"], s["cliente"],
+                 s["data_entrega"], s["usuario"], s.get("origem", "")),
+            )
+
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")

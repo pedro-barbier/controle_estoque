@@ -8,6 +8,7 @@
 data/*.csv
 data/*.csv.bak
 data/*.db
+data/sync_config.json
 __pycache__/
 *.pyc
 

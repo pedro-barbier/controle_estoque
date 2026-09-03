@@ -10,6 +10,8 @@ import os
 import secrets
 import sqlite3
 import sys
+import threading
+import uuid as uuid_lib
 
 if getattr(sys, "frozen", False):
     # Executável empacotado (PyInstaller): __file__ aponta para a pasta
@@ -57,27 +59,35 @@ CREATE TABLE produtos (
 
 CREATE TABLE entradas (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid          TEXT NOT NULL,
     data_hora     TEXT NOT NULL,
     codigo_barras TEXT NOT NULL,
     nome          TEXT NOT NULL,
     quantidade    INTEGER NOT NULL,
-    usuario       TEXT NOT NULL
+    usuario       TEXT NOT NULL,
+    origem        TEXT NOT NULL DEFAULT '',
+    sincronizado  INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX idx_entradas_data_hora     ON entradas(data_hora);
 CREATE INDEX idx_entradas_codigo_barras ON entradas(codigo_barras);
+CREATE UNIQUE INDEX idx_entradas_uuid   ON entradas(uuid);
 
 CREATE TABLE saidas (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid          TEXT NOT NULL,
     data_hora     TEXT NOT NULL,
     codigo_barras TEXT NOT NULL,
     nome          TEXT NOT NULL,
     quantidade    INTEGER NOT NULL,
     cliente       TEXT NOT NULL DEFAULT '',
     data_entrega  TEXT NOT NULL DEFAULT '',
-    usuario       TEXT NOT NULL
+    usuario       TEXT NOT NULL,
+    origem        TEXT NOT NULL DEFAULT '',
+    sincronizado  INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX idx_saidas_data_hora     ON saidas(data_hora);
 CREATE INDEX idx_saidas_codigo_barras ON saidas(codigo_barras);
+CREATE UNIQUE INDEX idx_saidas_uuid   ON saidas(uuid);
 
 CREATE TABLE clientes (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,10 +101,12 @@ CREATE TABLE usuarios (
     salt       TEXT NOT NULL
 );
 
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 """
 
-_conn = None
+SCHEMA_VERSION_ATUAL = 2
+
+_local = threading.local()
 
 
 def hash_senha(senha, salt):
@@ -193,17 +205,19 @@ def _importar_movimento(conn, path, tabela, tem_cliente):
         if tem_cliente:
             conn.execute(
                 f"INSERT INTO {tabela} "
-                "(data_hora, codigo_barras, nome, quantidade, cliente, data_entrega, usuario) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(uuid, data_hora, codigo_barras, nome, quantidade, cliente, data_entrega, usuario) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    linha["data_hora"], linha["codigo_barras"], linha["nome"], int(linha["quantidade"]),
-                    linha.get("cliente", ""), linha.get("data_entrega", ""), usuario,
+                    uuid_lib.uuid4().hex, linha["data_hora"], linha["codigo_barras"], linha["nome"],
+                    int(linha["quantidade"]), linha.get("cliente", ""), linha.get("data_entrega", ""), usuario,
                 ),
             )
         else:
             conn.execute(
-                f"INSERT INTO {tabela} (data_hora, codigo_barras, nome, quantidade, usuario) VALUES (?, ?, ?, ?, ?)",
-                (linha["data_hora"], linha["codigo_barras"], linha["nome"], int(linha["quantidade"]), usuario),
+                f"INSERT INTO {tabela} (uuid, data_hora, codigo_barras, nome, quantidade, usuario) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (uuid_lib.uuid4().hex, linha["data_hora"], linha["codigo_barras"], linha["nome"],
+                 int(linha["quantidade"]), usuario),
             )
 
 
@@ -282,6 +296,33 @@ def _construir_banco_novo():
             os.replace(caminho, caminho + ".bak")
 
 
+def _migrar_v1_para_v2(conn):
+    """Adiciona uuid/origem/sincronizado a entradas e saidas, suporte à
+    sincronização entre máquinas (controle_estoque-qw3). Linhas existentes
+    (todas gravadas nesta máquina antes da funcionalidade existir) recebem um
+    uuid novo e ficam marcadas como já sincronizadas, já que são a fonte da
+    verdade local — não há nada pendente de envio."""
+    for tabela in ("entradas", "saidas"):
+        colunas = {row["name"] for row in conn.execute(f"PRAGMA table_info({tabela})")}
+        if "uuid" not in colunas:
+            conn.execute(f"ALTER TABLE {tabela} ADD COLUMN uuid TEXT")
+        if "origem" not in colunas:
+            conn.execute(f"ALTER TABLE {tabela} ADD COLUMN origem TEXT NOT NULL DEFAULT ''")
+        if "sincronizado" not in colunas:
+            conn.execute(f"ALTER TABLE {tabela} ADD COLUMN sincronizado INTEGER NOT NULL DEFAULT 1")
+        for row in conn.execute(f"SELECT id FROM {tabela} WHERE uuid IS NULL OR uuid = ''"):
+            conn.execute(f"UPDATE {tabela} SET uuid = ? WHERE id = ?", (uuid_lib.uuid4().hex, row["id"]))
+        conn.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{tabela}_uuid ON {tabela}(uuid)")
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION_ATUAL}")
+    conn.commit()
+
+
+def _migrar_schema(conn):
+    versao = conn.execute("PRAGMA user_version").fetchone()[0]
+    if versao < SCHEMA_VERSION_ATUAL:
+        _migrar_v1_para_v2(conn)
+
+
 def ensure_db():
     is_new = not os.path.exists(DB_PATH)
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -290,10 +331,16 @@ def ensure_db():
 
 
 def get_connection():
-    global _conn
-    if _conn is None:
+    """Conexão SQLite own-per-thread: o servidor de sincronização (app/sync.py)
+    atende cada requisição numa thread própria, e conexões sqlite3 só podem ser
+    usadas na thread onde foram criadas."""
+    conn = getattr(_local, "conn", None)
+    if conn is None:
         os.makedirs(DATA_DIR, exist_ok=True)
-        _conn = sqlite3.connect(DB_PATH)
-        _conn.row_factory = sqlite3.Row
-        _conn.execute("PRAGMA foreign_keys = ON")
-    return _conn
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")  # evita "database is locked" ao concorrer com o servidor de sync
+        _migrar_schema(conn)
+        _local.conn = conn
+    return conn
