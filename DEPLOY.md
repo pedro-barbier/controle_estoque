@@ -28,13 +28,20 @@ possível gerar um `.exe` funcional a partir do Linux).
 4. Pronto — o dia a dia é dar dois cliques nesse ícone.
 
 Na primeira execução, o programa cria automaticamente uma pasta `data`
-dentro de `C:\ControleEstoqueCafe\` (do lado do `.exe`), com os arquivos
-`produtos.csv`, `entradas_estoque.csv` e `saidas_estoque.csv`. **Essa
-pasta guarda todo o histórico da loja — não delete nem mova o `.exe` para
-fora dela**, ou o programa vai começar do zero.
+dentro de `C:\ControleEstoqueCafe\` (do lado do `.exe`), com um único
+arquivo de banco de dados `estoque.db`. **Essa pasta guarda todo o
+histórico da loja — não delete nem mova o `.exe` para fora dela**, ou o
+programa vai começar do zero.
+
+Se a máquina já tinha uma instalação anterior baseada em CSV (`produtos.csv`,
+`entradas_estoque.csv`, etc.), a primeira execução da versão atualizada
+migra esses dados automaticamente para `estoque.db` — sem nenhum passo
+manual — e renomeia os CSVs originais para `.csv.bak` (guardados na mesma
+pasta `data`, como backup; nada é apagado).
 
 Para migrar os dados para outra máquina, basta copiar a pasta
-`C:\ControleEstoqueCafe\` inteira (executável + pasta `data`).
+`C:\ControleEstoqueCafe\` inteira (executável + pasta `data`, agora com um
+único arquivo `estoque.db` em vez de vários `.csv`).
 
 ## 4. Aviso do Windows ao abrir pela primeira vez
 

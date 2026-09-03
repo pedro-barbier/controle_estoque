@@ -6,6 +6,8 @@
 
 # Dados de estoque (gerados em tempo de execução)
 data/*.csv
+data/*.csv.bak
+data/*.db
 __pycache__/
 *.pyc
 

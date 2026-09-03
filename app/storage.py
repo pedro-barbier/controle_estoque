@@ -1,187 +1,94 @@
-"""Leitura e escrita dos dados da aplicação em arquivos CSV separados."""
+"""Leitura e escrita dos dados da aplicação em um banco SQLite local (data/estoque.db)."""
 
-import csv
-import hashlib
 import hmac
-import os
-import secrets
-import sys
 from datetime import datetime
 
-if getattr(sys, "frozen", False):
-    # Executável empacotado (PyInstaller): __file__ aponta para a pasta
-    # temporária de extração, que é apagada a cada execução. Os dados
-    # precisam ficar ao lado do executável para persistir entre execuções.
-    BASE_DIR = os.path.dirname(sys.executable)
-else:
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-DATA_DIR = os.path.join(BASE_DIR, "data")
-
-PRODUTOS_CSV = os.path.join(DATA_DIR, "produtos.csv")
-ENTRADAS_CSV = os.path.join(DATA_DIR, "entradas_estoque.csv")
-SAIDAS_CSV = os.path.join(DATA_DIR, "saidas_estoque.csv")
-CLIENTES_CSV = os.path.join(DATA_DIR, "clientes.csv")
-USUARIOS_CSV = os.path.join(DATA_DIR, "usuarios.csv")
-
-PRODUTOS_HEADERS = [
-    "codigo_barras", "nome", "valor", "unidade_medida", "e_caixa", "quantidade_pacotes", "produto_relacionado",
-]
-ENTRADAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade", "usuario"]
-SAIDAS_HEADERS = ["data_hora", "codigo_barras", "nome", "quantidade", "cliente", "data_entrega", "usuario"]
-CLIENTES_HEADERS = ["id", "nome", "unidade"]
-USUARIOS_HEADERS = ["usuario", "senha_hash", "salt"]
-
-_USUARIOS_INICIAIS = [
-    ("Jussara", "@porto498015"),
-    ("Sarah", "S152489"),
-    ("Pedro", "#200089pHB"),
-]
-
-
-def _ensure_csv(path, headers):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    if not os.path.exists(path):
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow(headers)
-
-
-def _migrar_produtos_csv():
-    """Adiciona colunas novas a um produtos.csv de uma versão anterior, preservando os dados."""
-    if not os.path.exists(PRODUTOS_CSV):
-        return
-    with open(PRODUTOS_CSV, newline="", encoding="utf-8") as f:
-        header = next(csv.reader(f), None)
-    if header == PRODUTOS_HEADERS:
-        return
-    with open(PRODUTOS_CSV, newline="", encoding="utf-8") as f:
-        linhas = list(csv.DictReader(f, restval=""))
-    with open(PRODUTOS_CSV, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=PRODUTOS_HEADERS)
-        writer.writeheader()
-        for linha in linhas:
-            nova = {campo: linha.get(campo, "") for campo in PRODUTOS_HEADERS}
-            if not nova["valor"] and linha.get("peso_gramas"):
-                # Versões anteriores só tinham peso, sempre normalizado em gramas.
-                nova["valor"] = linha["peso_gramas"]
-                nova["unidade_medida"] = "g"
-            writer.writerow(nova)
-
-
-def _migrar_csv_movimento(path, headers):
-    """Adiciona a coluna 'usuario' a um entradas/saidas CSV de versão anterior.
-
-    Linhas gravadas antes da existência do login não têm autor conhecido, e
-    recebem o marcador "desconhecido" em vez de ficarem em branco.
-    """
-    if not os.path.exists(path):
-        return
-    with open(path, newline="", encoding="utf-8") as f:
-        header = next(csv.reader(f), None)
-    if header == headers:
-        return
-    with open(path, newline="", encoding="utf-8") as f:
-        linhas = list(csv.DictReader(f, restval=""))
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writeheader()
-        for linha in linhas:
-            nova = {campo: linha.get(campo, "") for campo in headers}
-            if not nova.get("usuario"):
-                nova["usuario"] = "desconhecido"
-            writer.writerow(nova)
-
-
-def _hash_senha(senha, salt):
-    return hashlib.sha256(f"{salt}{senha}".encode("utf-8")).hexdigest()
-
-
-def _seed_usuarios_iniciais():
-    with open(USUARIOS_CSV, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        for usuario, senha in _USUARIOS_INICIAIS:
-            salt = secrets.token_hex(16)
-            writer.writerow([usuario, _hash_senha(senha, salt), salt])
+from app import db
 
 
 def ensure_files():
-    _ensure_csv(PRODUTOS_CSV, PRODUTOS_HEADERS)
-    _migrar_produtos_csv()
-
-    usuarios_novo = not os.path.exists(USUARIOS_CSV)
-    _ensure_csv(USUARIOS_CSV, USUARIOS_HEADERS)
-    if usuarios_novo:
-        _seed_usuarios_iniciais()
-
-    _ensure_csv(ENTRADAS_CSV, ENTRADAS_HEADERS)
-    _migrar_csv_movimento(ENTRADAS_CSV, ENTRADAS_HEADERS)
-    _ensure_csv(SAIDAS_CSV, SAIDAS_HEADERS)
-    _migrar_csv_movimento(SAIDAS_CSV, SAIDAS_HEADERS)
-    _ensure_csv(CLIENTES_CSV, CLIENTES_HEADERS)
+    db.ensure_db()
 
 
 def listar_usuarios():
     ensure_files()
-    with open(USUARIOS_CSV, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+    conn = db.get_connection()
+    rows = conn.execute("SELECT usuario, senha_hash, salt FROM usuarios").fetchall()
+    return [dict(row) for row in rows]
 
 
 def verificar_login(usuario, senha):
-    """Retorna o nome de usuário canônico (como gravado no CSV) em caso de
+    """Retorna o nome de usuário canônico (como gravado no banco) em caso de
     sucesso, ou None se usuário/senha inválidos."""
     usuario_norm = (usuario or "").strip().lower()
     for u in listar_usuarios():
         if u["usuario"].strip().lower() == usuario_norm:
-            calculado = _hash_senha(senha, u["salt"])
+            calculado = db.hash_senha(senha, u["salt"])
             if hmac.compare_digest(calculado, u["senha_hash"]):
                 return u["usuario"]
             return None
     return None
 
 
+def _produto_row_to_dict(row):
+    return {
+        "codigo_barras": row["codigo_barras"],
+        "nome": row["nome"],
+        "valor": str(row["valor"]),
+        "unidade_medida": row["unidade_medida"],
+        "e_caixa": "sim" if row["e_caixa"] else "nao",
+        "quantidade_pacotes": str(row["quantidade_pacotes"]) if row["quantidade_pacotes"] is not None else "",
+        "produto_relacionado": row["produto_relacionado"] or "",
+    }
+
+
 def listar_produtos():
     ensure_files()
-    with open(PRODUTOS_CSV, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+    conn = db.get_connection()
+    rows = conn.execute("SELECT * FROM produtos").fetchall()
+    return [_produto_row_to_dict(row) for row in rows]
 
 
 def buscar_produto(codigo_barras):
-    for produto in listar_produtos():
-        if produto["codigo_barras"] == codigo_barras:
-            return produto
-    return None
+    ensure_files()
+    conn = db.get_connection()
+    row = conn.execute("SELECT * FROM produtos WHERE codigo_barras = ?", (codigo_barras,)).fetchone()
+    return _produto_row_to_dict(row) if row else None
 
 
 def adicionar_produto(codigo_barras, nome, valor, unidade_medida, e_caixa, quantidade_pacotes, produto_relacionado=""):
     ensure_files()
-    with open(PRODUTOS_CSV, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow([
+    conn = db.get_connection()
+    conn.execute(
+        "INSERT INTO produtos "
+        "(codigo_barras, nome, valor, unidade_medida, e_caixa, quantidade_pacotes, produto_relacionado) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
             codigo_barras,
             nome,
-            valor,
+            float(valor),
             unidade_medida,
-            "sim" if e_caixa else "nao",
-            quantidade_pacotes if e_caixa else "",
-            produto_relacionado if e_caixa else "",
-        ])
+            1 if e_caixa else 0,
+            int(quantidade_pacotes) if e_caixa and quantidade_pacotes not in (None, "") else None,
+            produto_relacionado if e_caixa and produto_relacionado else None,
+        ),
+    )
+    conn.commit()
 
 
 def remover_produto(codigo_barras):
-    produtos = listar_produtos()
-    restantes = [p for p in produtos if p["codigo_barras"] != codigo_barras]
-    if len(restantes) == len(produtos):
-        return False
-    with open(PRODUTOS_CSV, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=PRODUTOS_HEADERS)
-        writer.writeheader()
-        writer.writerows(restantes)
-    return True
+    ensure_files()
+    conn = db.get_connection()
+    cursor = conn.execute("DELETE FROM produtos WHERE codigo_barras = ?", (codigo_barras,))
+    conn.commit()
+    return cursor.rowcount > 0
 
 
 def listar_clientes():
     ensure_files()
-    with open(CLIENTES_CSV, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+    conn = db.get_connection()
+    rows = conn.execute("SELECT id, nome, unidade FROM clientes").fetchall()
+    return [{"id": str(row["id"]), "nome": row["nome"], "unidade": row["unidade"]} for row in rows]
 
 
 def nome_completo_cliente(cliente):
@@ -197,23 +104,18 @@ def nome_completo_cliente(cliente):
 
 def adicionar_cliente(nome, unidade=""):
     ensure_files()
-    clientes = listar_clientes()
-    proximo_id = str(max((int(c["id"]) for c in clientes), default=0) + 1)
-    with open(CLIENTES_CSV, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow([proximo_id, nome, unidade])
-    return proximo_id
+    conn = db.get_connection()
+    cursor = conn.execute("INSERT INTO clientes (nome, unidade) VALUES (?, ?)", (nome, unidade))
+    conn.commit()
+    return str(cursor.lastrowid)
 
 
 def remover_cliente(cliente_id):
-    clientes = listar_clientes()
-    restantes = [c for c in clientes if c["id"] != cliente_id]
-    if len(restantes) == len(clientes):
-        return False
-    with open(CLIENTES_CSV, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CLIENTES_HEADERS)
-        writer.writeheader()
-        writer.writerows(restantes)
-    return True
+    ensure_files()
+    conn = db.get_connection()
+    cursor = conn.execute("DELETE FROM clientes WHERE id = ?", (int(cliente_id),))
+    conn.commit()
+    return cursor.rowcount > 0
 
 
 def descrever_item_estoque(codigo_barras):
@@ -276,44 +178,74 @@ def expandir_itens_pendentes(pendentes):
 def resetar_estoque():
     """Apaga todo o histórico de entradas e saídas de estoque, mantendo os produtos cadastrados."""
     ensure_files()
-    with open(ENTRADAS_CSV, "w", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow(ENTRADAS_HEADERS)
-    with open(SAIDAS_CSV, "w", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow(SAIDAS_HEADERS)
+    conn = db.get_connection()
+    conn.execute("DELETE FROM entradas")
+    conn.execute("DELETE FROM saidas")
+    conn.commit()
 
 
 def registrar_entrada(itens, usuario):
     """itens: lista de dicts com codigo_barras, nome, quantidade."""
     ensure_files()
+    conn = db.get_connection()
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(ENTRADAS_CSV, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        for item in itens:
-            writer.writerow([agora, item["codigo_barras"], item["nome"], item["quantidade"], usuario])
+    for item in itens:
+        conn.execute(
+            "INSERT INTO entradas (data_hora, codigo_barras, nome, quantidade, usuario) VALUES (?, ?, ?, ?, ?)",
+            (agora, item["codigo_barras"], item["nome"], item["quantidade"], usuario),
+        )
+    conn.commit()
 
 
 def registrar_saida(itens, cliente, data_entrega, usuario):
     """itens: lista de dicts com codigo_barras, nome, quantidade."""
     ensure_files()
+    conn = db.get_connection()
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(SAIDAS_CSV, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        for item in itens:
-            writer.writerow([
-                agora, item["codigo_barras"], item["nome"], item["quantidade"], cliente, data_entrega, usuario
-            ])
+    for item in itens:
+        conn.execute(
+            "INSERT INTO saidas "
+            "(data_hora, codigo_barras, nome, quantidade, cliente, data_entrega, usuario) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (agora, item["codigo_barras"], item["nome"], item["quantidade"], cliente, data_entrega, usuario),
+        )
+    conn.commit()
 
 
 def listar_entradas():
     ensure_files()
-    with open(ENTRADAS_CSV, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+    conn = db.get_connection()
+    rows = conn.execute("SELECT data_hora, codigo_barras, nome, quantidade, usuario FROM entradas").fetchall()
+    return [
+        {
+            "data_hora": row["data_hora"],
+            "codigo_barras": row["codigo_barras"],
+            "nome": row["nome"],
+            "quantidade": str(row["quantidade"]),
+            "usuario": row["usuario"],
+        }
+        for row in rows
+    ]
 
 
 def listar_saidas():
     ensure_files()
-    with open(SAIDAS_CSV, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+    conn = db.get_connection()
+    rows = conn.execute(
+        "SELECT data_hora, codigo_barras, nome, quantidade, cliente, data_entrega, usuario FROM saidas"
+    ).fetchall()
+    return [
+        {
+            "data_hora": row["data_hora"],
+            "codigo_barras": row["codigo_barras"],
+            "nome": row["nome"],
+            "quantidade": str(row["quantidade"]),
+            "cliente": row["cliente"],
+            "data_entrega": row["data_entrega"],
+            "usuario": row["usuario"],
+        }
+        for row in rows
+    ]
 
 
 def listar_movimentos():
