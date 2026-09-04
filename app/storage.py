@@ -1,6 +1,7 @@
 """Leitura e escrita dos dados da aplicação em um banco SQLite local (data/estoque.db)."""
 
 import hmac
+import secrets
 import uuid as uuid_lib
 from datetime import datetime
 
@@ -14,7 +15,7 @@ def ensure_files():
 def listar_usuarios():
     ensure_files()
     conn = db.get_connection()
-    rows = conn.execute("SELECT usuario, senha_hash, salt FROM usuarios").fetchall()
+    rows = conn.execute("SELECT usuario, senha_hash, salt, admin FROM usuarios").fetchall()
     return [dict(row) for row in rows]
 
 
@@ -29,6 +30,101 @@ def verificar_login(usuario, senha):
                 return u["usuario"]
             return None
     return None
+
+
+def usuario_e_admin(usuario):
+    usuario_norm = (usuario or "").strip().lower()
+    for u in listar_usuarios():
+        if u["usuario"].strip().lower() == usuario_norm:
+            return bool(u["admin"])
+    return False
+
+
+def _buscar_usuario(usuario):
+    usuario_norm = (usuario or "").strip().lower()
+    for u in listar_usuarios():
+        if u["usuario"].strip().lower() == usuario_norm:
+            return u
+    return None
+
+
+def _total_admins(excluir_usuario=None):
+    excluir_norm = (excluir_usuario or "").strip().lower()
+    return sum(
+        1 for u in listar_usuarios()
+        if u["admin"] and u["usuario"].strip().lower() != excluir_norm
+    )
+
+
+def criar_usuario(usuario, senha, admin=False):
+    """Cria um novo usuário. Levanta ValueError se o nome já estiver em uso."""
+    ensure_files()
+    usuario = (usuario or "").strip()
+    if not usuario:
+        raise ValueError("Informe o nome de usuário.")
+    if not senha:
+        raise ValueError("Informe a senha.")
+    if _buscar_usuario(usuario):
+        raise ValueError(f"Já existe um usuário chamado '{usuario}'.")
+    salt = secrets.token_hex(16)
+    conn = db.get_connection()
+    conn.execute(
+        "INSERT INTO usuarios (usuario, senha_hash, salt, admin) VALUES (?, ?, ?, ?)",
+        (usuario, db.hash_senha(senha, salt), salt, 1 if admin else 0),
+    )
+    conn.commit()
+
+
+def atualizar_usuario(usuario_atual, novo_usuario=None, nova_senha=None, admin=None):
+    """Atualiza nome/senha/admin de um usuário existente.
+
+    Movimentações passadas (entradas/saidas.usuario) guardam o nome de quem
+    agiu na hora, não uma referência viva ao usuário — renomear aqui não
+    reescreve o histórico, de propósito, para preservar a auditoria original.
+    """
+    ensure_files()
+    atual = _buscar_usuario(usuario_atual)
+    if not atual:
+        raise ValueError(f"Usuário '{usuario_atual}' não encontrado.")
+
+    if admin is False and bool(atual["admin"]) and _total_admins(excluir_usuario=usuario_atual) == 0:
+        raise ValueError("Não é possível remover o último administrador do sistema.")
+
+    conn = db.get_connection()
+    if novo_usuario is not None:
+        novo_usuario = novo_usuario.strip()
+        if not novo_usuario:
+            raise ValueError("Informe o nome de usuário.")
+        if novo_usuario.strip().lower() != usuario_atual.strip().lower() and _buscar_usuario(novo_usuario):
+            raise ValueError(f"Já existe um usuário chamado '{novo_usuario}'.")
+        conn.execute("UPDATE usuarios SET usuario = ? WHERE usuario = ?", (novo_usuario, atual["usuario"]))
+        atual_nome = novo_usuario
+    else:
+        atual_nome = atual["usuario"]
+
+    if nova_senha:
+        salt = secrets.token_hex(16)
+        conn.execute(
+            "UPDATE usuarios SET senha_hash = ?, salt = ? WHERE usuario = ?",
+            (db.hash_senha(nova_senha, salt), salt, atual_nome),
+        )
+
+    if admin is not None:
+        conn.execute("UPDATE usuarios SET admin = ? WHERE usuario = ?", (1 if admin else 0, atual_nome))
+
+    conn.commit()
+
+
+def remover_usuario(usuario):
+    ensure_files()
+    atual = _buscar_usuario(usuario)
+    if not atual:
+        raise ValueError(f"Usuário '{usuario}' não encontrado.")
+    if bool(atual["admin"]) and _total_admins(excluir_usuario=usuario) == 0:
+        raise ValueError("Não é possível remover o último administrador do sistema.")
+    conn = db.get_connection()
+    conn.execute("DELETE FROM usuarios WHERE usuario = ?", (atual["usuario"],))
+    conn.commit()
 
 
 def _produto_row_to_dict(row):
@@ -352,7 +448,7 @@ def dados_para_sincronizacao():
     return {
         "produtos": [_produto_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM produtos")],
         "clientes": [dict(r) for r in conn.execute("SELECT id, nome, unidade FROM clientes")],
-        "usuarios": [dict(r) for r in conn.execute("SELECT usuario, senha_hash, salt FROM usuarios")],
+        "usuarios": [dict(r) for r in conn.execute("SELECT usuario, senha_hash, salt, admin FROM usuarios")],
         "entradas": [_entrada_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM entradas")],
         "saidas": [_saida_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM saidas")],
     }
@@ -442,8 +538,8 @@ def aplicar_dados_sincronizados(dados):
         conn.execute("DELETE FROM usuarios")
         for u in dados.get("usuarios", []):
             conn.execute(
-                "INSERT INTO usuarios (usuario, senha_hash, salt) VALUES (?, ?, ?)",
-                (u["usuario"], u["senha_hash"], u["salt"]),
+                "INSERT INTO usuarios (usuario, senha_hash, salt, admin) VALUES (?, ?, ?, ?)",
+                (u["usuario"], u["senha_hash"], u["salt"], 1 if u.get("admin") else 0),
             )
 
         conn.execute("DELETE FROM entradas")

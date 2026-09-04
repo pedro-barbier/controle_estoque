@@ -98,13 +98,14 @@ CREATE TABLE clientes (
 CREATE TABLE usuarios (
     usuario    TEXT PRIMARY KEY,
     senha_hash TEXT NOT NULL,
-    salt       TEXT NOT NULL
+    salt       TEXT NOT NULL,
+    admin      INTEGER NOT NULL DEFAULT 0 CHECK (admin IN (0, 1))
 );
 
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 """
 
-SCHEMA_VERSION_ATUAL = 2
+SCHEMA_VERSION_ATUAL = 3
 
 _local = threading.local()
 
@@ -234,9 +235,10 @@ def _importar_clientes(conn):
 def _seed_usuarios_iniciais(conn):
     for usuario, senha in _USUARIOS_INICIAIS:
         salt = secrets.token_hex(16)
+        admin = 1 if usuario.strip().lower() == "pedro" else 0
         conn.execute(
-            "INSERT INTO usuarios (usuario, senha_hash, salt) VALUES (?, ?, ?)",
-            (usuario, hash_senha(senha, salt), salt),
+            "INSERT INTO usuarios (usuario, senha_hash, salt, admin) VALUES (?, ?, ?, ?)",
+            (usuario, hash_senha(senha, salt), salt, admin),
         )
 
 
@@ -284,6 +286,9 @@ def _construir_banco_novo():
         total_usuarios = conn.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0]
         if total_usuarios == 0:
             _seed_usuarios_iniciais(conn)
+        else:
+            # usuarios.csv legado não tinha o conceito de admin — Pedro é sempre admin.
+            conn.execute("UPDATE usuarios SET admin = 1 WHERE lower(usuario) = 'pedro'")
 
         conn.commit()
     finally:
@@ -313,14 +318,30 @@ def _migrar_v1_para_v2(conn):
         for row in conn.execute(f"SELECT id FROM {tabela} WHERE uuid IS NULL OR uuid = ''"):
             conn.execute(f"UPDATE {tabela} SET uuid = ? WHERE id = ?", (uuid_lib.uuid4().hex, row["id"]))
         conn.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{tabela}_uuid ON {tabela}(uuid)")
-    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION_ATUAL}")
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+
+
+def _migrar_v2_para_v3(conn):
+    """Adiciona a coluna 'admin' a usuarios, suporte a usuários administradores
+    (controle_estoque-adm). Pedro é sempre promovido a admin nesta migração —
+    ele é o administrador original do sistema; quem mais deve ser admin passa
+    a ser decidido na tela de administradores."""
+    colunas = {row["name"] for row in conn.execute("PRAGMA table_info(usuarios)")}
+    if "admin" not in colunas:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN admin INTEGER NOT NULL DEFAULT 0")
+    conn.execute("UPDATE usuarios SET admin = 1 WHERE lower(usuario) = 'pedro'")
+    conn.execute("PRAGMA user_version = 3")
     conn.commit()
 
 
 def _migrar_schema(conn):
     versao = conn.execute("PRAGMA user_version").fetchone()[0]
-    if versao < SCHEMA_VERSION_ATUAL:
+    if versao < 2:
         _migrar_v1_para_v2(conn)
+        versao = 2
+    if versao < 3:
+        _migrar_v2_para_v3(conn)
 
 
 def ensure_db():

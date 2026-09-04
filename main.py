@@ -1,4 +1,5 @@
 import tkinter as tk
+from tkinter import messagebox
 
 from app import storage, sync, sync_config
 from app.ui.clientes import ClientesFrame
@@ -8,6 +9,7 @@ from app.ui.main_menu import MainMenu
 from app.ui.remover_produto import RemoverProdutoFrame
 from app.ui.registrar_produto import RegistrarProdutoFrame
 from app.ui.saida_estoque import SaidaEstoqueFrame
+from app.ui.usuarios import UsuariosFrame
 from app.ui.visualizar_estoque import VisualizarEstoqueFrame
 
 PROTECTED_FRAMES = {
@@ -16,7 +18,11 @@ PROTECTED_FRAMES = {
     "ClientesFrame",
     "EntradaEstoqueFrame",
     "SaidaEstoqueFrame",
+    "UsuariosFrame",
 }
+
+# Exigem, além de login, que o usuário logado seja administrador.
+ADMIN_FRAMES = {"UsuariosFrame"}
 
 
 class App(tk.Tk):
@@ -40,6 +46,7 @@ class App(tk.Tk):
             EntradaEstoqueFrame,
             SaidaEstoqueFrame,
             VisualizarEstoqueFrame,
+            UsuariosFrame,
         ):
             frame = F(container, self)
             self.frames[F.__name__] = frame
@@ -55,11 +62,17 @@ class App(tk.Tk):
     def show_frame(self, name):
         if name in PROTECTED_FRAMES and not self.require_login():
             return
+        if name in ADMIN_FRAMES and not self.usuario_e_admin():
+            messagebox.showerror("Acesso negado", "Apenas administradores podem acessar esta tela.")
+            return
         self.current_frame_name = name
         frame = self.frames[name]
         if hasattr(frame, "on_show"):
             frame.on_show()
         frame.tkraise()
+
+    def usuario_e_admin(self):
+        return bool(self.usuario_logado) and storage.usuario_e_admin(self.usuario_logado)
 
     def require_login(self):
         """Garante que há um usuário logado, pedindo login se necessário.

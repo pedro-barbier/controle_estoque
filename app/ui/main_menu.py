@@ -57,18 +57,38 @@ class MainMenu(tk.Frame):
                 command=lambda f=frame_name: controller.show_frame(f),
             ).pack(pady=8)
 
-        if not e_secundaria:
-            tk.Button(
-                self, text="Resetar Estoque", font=btn_font, width=30, height=2,
-                fg="white", bg="#b03a2e", activeforeground="white", activebackground="#922b21",
-                command=self.on_reset_estoque,
-            ).pack(pady=(20, 8))
+        # Botões visíveis só para administradores (controle_estoque-adm). Ficam
+        # sempre criados, mas escondidos/mostrados em _atualizar_visibilidade_admin,
+        # já que o status de admin do usuário logado só é conhecido em tempo de
+        # execução (e muda quando alguém troca de usuário).
+        self.e_secundaria = e_secundaria
+        self.admin_frame = tk.Frame(self)
+        self.admin_frame.pack(pady=(20, 8))
+        self.usuarios_button = tk.Button(
+            self.admin_frame, text="Administradores", font=btn_font, width=30, height=2,
+            command=lambda: controller.show_frame("UsuariosFrame"),
+        )
+        self.reset_button = tk.Button(
+            self.admin_frame, text="Resetar Estoque", font=btn_font, width=30, height=2,
+            fg="white", bg="#b03a2e", activeforeground="white", activebackground="#922b21",
+            command=self.on_reset_estoque,
+        )
 
         tk.Button(self, text="Sair", command=controller.destroy).pack(pady=20)
 
     def on_show(self):
         self._atualizar_status_usuario()
         self._atualizar_status_sync()
+        self._atualizar_visibilidade_admin()
+
+    def _atualizar_visibilidade_admin(self):
+        e_admin = self.controller.usuario_e_admin()
+        self.usuarios_button.pack_forget()
+        self.reset_button.pack_forget()
+        if e_admin:
+            self.usuarios_button.pack(pady=(0, 8))
+        if e_admin and not self.e_secundaria:
+            self.reset_button.pack(pady=(0, 8))
 
     def _atualizar_status_usuario(self):
         nome = self.controller.usuario_logado
@@ -131,12 +151,17 @@ class MainMenu(tk.Frame):
     def on_trocar_usuario(self):
         self.controller.usuario_logado = None
         self._atualizar_status_usuario()
+        self._atualizar_visibilidade_admin()
         messagebox.showinfo(
             "Usuário", "Sessão encerrada. Um novo login será pedido na próxima ação que exigir usuário."
         )
 
     def on_reset_estoque(self):
         if not self.controller.require_login():
+            return
+        if not self.controller.usuario_e_admin():
+            messagebox.showerror("Acesso negado", "Apenas administradores podem resetar o estoque.")
+            self._atualizar_visibilidade_admin()
             return
         if not messagebox.askyesno(
             "Resetar Estoque",
