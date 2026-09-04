@@ -66,6 +66,7 @@ class _SyncHandler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             self._responder_json(400, {"erro": "corpo inválido"})
             return
+        storage.mesclar_usuarios(dados.get("usuarios", []))
         resultado = storage.registrar_movimentos_recebidos(dados.get("entradas", []), dados.get("saidas", []))
         self._responder_json(200, resultado)
 

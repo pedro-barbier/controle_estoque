@@ -12,10 +12,14 @@ def ensure_files():
     db.ensure_db()
 
 
+def _timestamp_atual():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+
+
 def listar_usuarios():
     ensure_files()
     conn = db.get_connection()
-    rows = conn.execute("SELECT usuario, senha_hash, salt, admin FROM usuarios").fetchall()
+    rows = conn.execute("SELECT usuario, senha_hash, salt, admin FROM usuarios WHERE deletado = 0").fetchall()
     return [dict(row) for row in rows]
 
 
@@ -56,8 +60,18 @@ def _total_admins(excluir_usuario=None):
     )
 
 
+def _buscar_usuario_linha_bruta(usuario):
+    """Busca a linha de usuarios por nome (normalizado), incluindo removidos
+    (deletado=1) — usado por `criar_usuario` para decidir entre INSERT e
+    UPDATE, já que 'usuario' é chave primária e um nome removido nesta
+    máquina mas ainda não sincronizado continua ocupando a linha."""
+    usuario_norm = (usuario or "").strip().lower()
+    conn = db.get_connection()
+    return conn.execute("SELECT usuario FROM usuarios WHERE lower(usuario) = ?", (usuario_norm,)).fetchone()
+
+
 def criar_usuario(usuario, senha, admin=False):
-    """Cria um novo usuário. Levanta ValueError se o nome já estiver em uso."""
+    """Cria um novo usuário. Levanta ValueError se já houver um usuário ativo com esse nome."""
     ensure_files()
     usuario = (usuario or "").strip()
     if not usuario:
@@ -67,11 +81,22 @@ def criar_usuario(usuario, senha, admin=False):
     if _buscar_usuario(usuario):
         raise ValueError(f"Já existe um usuário chamado '{usuario}'.")
     salt = secrets.token_hex(16)
+    senha_hash = db.hash_senha(senha, salt)
+    agora = _timestamp_atual()
     conn = db.get_connection()
-    conn.execute(
-        "INSERT INTO usuarios (usuario, senha_hash, salt, admin) VALUES (?, ?, ?, ?)",
-        (usuario, db.hash_senha(senha, salt), salt, 1 if admin else 0),
-    )
+    existente = _buscar_usuario_linha_bruta(usuario)
+    if existente:
+        conn.execute(
+            "UPDATE usuarios SET usuario = ?, senha_hash = ?, salt = ?, admin = ?, "
+            "atualizado_em = ?, deletado = 0 WHERE usuario = ?",
+            (usuario, senha_hash, salt, 1 if admin else 0, agora, existente["usuario"]),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO usuarios (usuario, senha_hash, salt, admin, atualizado_em, deletado) "
+            "VALUES (?, ?, ?, ?, ?, 0)",
+            (usuario, senha_hash, salt, 1 if admin else 0, agora),
+        )
     conn.commit()
 
 
@@ -91,13 +116,17 @@ def atualizar_usuario(usuario_atual, novo_usuario=None, nova_senha=None, admin=N
         raise ValueError("Não é possível remover o último administrador do sistema.")
 
     conn = db.get_connection()
+    agora = _timestamp_atual()
     if novo_usuario is not None:
         novo_usuario = novo_usuario.strip()
         if not novo_usuario:
             raise ValueError("Informe o nome de usuário.")
         if novo_usuario.strip().lower() != usuario_atual.strip().lower() and _buscar_usuario(novo_usuario):
             raise ValueError(f"Já existe um usuário chamado '{novo_usuario}'.")
-        conn.execute("UPDATE usuarios SET usuario = ? WHERE usuario = ?", (novo_usuario, atual["usuario"]))
+        conn.execute(
+            "UPDATE usuarios SET usuario = ?, atualizado_em = ? WHERE usuario = ?",
+            (novo_usuario, agora, atual["usuario"]),
+        )
         atual_nome = novo_usuario
     else:
         atual_nome = atual["usuario"]
@@ -105,17 +134,23 @@ def atualizar_usuario(usuario_atual, novo_usuario=None, nova_senha=None, admin=N
     if nova_senha:
         salt = secrets.token_hex(16)
         conn.execute(
-            "UPDATE usuarios SET senha_hash = ?, salt = ? WHERE usuario = ?",
-            (db.hash_senha(nova_senha, salt), salt, atual_nome),
+            "UPDATE usuarios SET senha_hash = ?, salt = ?, atualizado_em = ? WHERE usuario = ?",
+            (db.hash_senha(nova_senha, salt), salt, agora, atual_nome),
         )
 
     if admin is not None:
-        conn.execute("UPDATE usuarios SET admin = ? WHERE usuario = ?", (1 if admin else 0, atual_nome))
+        conn.execute(
+            "UPDATE usuarios SET admin = ?, atualizado_em = ? WHERE usuario = ?",
+            (1 if admin else 0, agora, atual_nome),
+        )
 
     conn.commit()
 
 
 def remover_usuario(usuario):
+    """Remove um usuário (soft-delete: marca `deletado` em vez de apagar a linha),
+    para que a remoção em si se propague para as outras máquinas na próxima
+    sincronização (ver `mesclar_usuarios`)."""
     ensure_files()
     atual = _buscar_usuario(usuario)
     if not atual:
@@ -123,7 +158,10 @@ def remover_usuario(usuario):
     if bool(atual["admin"]) and _total_admins(excluir_usuario=usuario) == 0:
         raise ValueError("Não é possível remover o último administrador do sistema.")
     conn = db.get_connection()
-    conn.execute("DELETE FROM usuarios WHERE usuario = ?", (atual["usuario"],))
+    conn.execute(
+        "UPDATE usuarios SET deletado = 1, atualizado_em = ? WHERE usuario = ?",
+        (_timestamp_atual(), atual["usuario"]),
+    )
     conn.commit()
 
 
@@ -441,21 +479,47 @@ def _saida_row_to_sync_dict(row):
     }
 
 
+def _usuario_row_to_sync_dict(row):
+    return {
+        "usuario": row["usuario"],
+        "senha_hash": row["senha_hash"],
+        "salt": row["salt"],
+        "admin": row["admin"],
+        "atualizado_em": row["atualizado_em"],
+        "deletado": row["deletado"],
+    }
+
+
 def dados_para_sincronizacao():
-    """Todo o conteúdo do banco no formato do protocolo de sincronização (lado principal, GET /sync/full)."""
+    """Todo o conteúdo do banco no formato do protocolo de sincronização (lado principal, GET /sync/full).
+
+    Usuarios incluem removidos (deletado=1) e o timestamp de atualização —
+    a secundária substitui sua tabela inteira por este retorno (ver
+    `aplicar_dados_sincronizados`), e precisa desses dois campos para poder
+    reenviar esse mesmo estado num push futuro (ver `movimentos_pendentes` e
+    `mesclar_usuarios`).
+    """
     ensure_files()
     conn = db.get_connection()
     return {
         "produtos": [_produto_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM produtos")],
         "clientes": [dict(r) for r in conn.execute("SELECT id, nome, unidade FROM clientes")],
-        "usuarios": [dict(r) for r in conn.execute("SELECT usuario, senha_hash, salt, admin FROM usuarios")],
+        "usuarios": [_usuario_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM usuarios")],
         "entradas": [_entrada_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM entradas")],
         "saidas": [_saida_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM saidas")],
     }
 
 
 def movimentos_pendentes():
-    """Entradas/saídas criadas localmente ainda não enviadas à principal (lado secundária, antes do POST /sync/push)."""
+    """Entradas/saídas criadas localmente ainda não enviadas à principal, e o
+    estado local completo de usuarios (lado secundária, antes do POST /sync/push).
+
+    Usuarios vai inteiro (não só os "pendentes") porque a tabela é pequena e
+    mutável (criar/editar/remover, não só inserir) — a principal mescla essa
+    lista com a dela mantendo, por usuário, a versão com atualizado_em mais
+    recente (ver `mesclar_usuarios`). É assim que um usuário cadastrado numa
+    secundária deixa de ser apagado no sync seguinte.
+    """
     ensure_files()
     conn = db.get_connection()
     return {
@@ -465,7 +529,43 @@ def movimentos_pendentes():
         "saidas": [
             _saida_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM saidas WHERE sincronizado = 0")
         ],
+        "usuarios": [_usuario_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM usuarios")],
     }
+
+
+def mesclar_usuarios(usuarios_recebidos):
+    """Mescla usuarios recebidos no push de uma máquina secundária (lado
+    principal, POST /sync/push).
+
+    Para cada usuário recebido, mantém a versão com atualizado_em mais
+    recente entre a local e a recebida (last-write-wins por usuário,
+    comparado por nome normalizado). Cobre criação, edição e remoção
+    (soft-delete) feitas na secundária — a versão mesclada resultante é o que
+    a principal devolve depois em GET /sync/full, propagando para as demais
+    máquinas no sync delas.
+    """
+    ensure_files()
+    conn = db.get_connection()
+    for item in usuarios_recebidos:
+        nome_norm = (item.get("usuario") or "").strip().lower()
+        if not nome_norm:
+            continue
+        atual = conn.execute(
+            "SELECT usuario, atualizado_em FROM usuarios WHERE lower(usuario) = ?", (nome_norm,)
+        ).fetchone()
+        if atual and (atual["atualizado_em"] or "") >= (item.get("atualizado_em") or ""):
+            continue
+        if atual:
+            conn.execute("DELETE FROM usuarios WHERE usuario = ?", (atual["usuario"],))
+        conn.execute(
+            "INSERT INTO usuarios (usuario, senha_hash, salt, admin, atualizado_em, deletado) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                item["usuario"], item["senha_hash"], item["salt"], 1 if item.get("admin") else 0,
+                item.get("atualizado_em") or "", 1 if item.get("deletado") else 0,
+            ),
+        )
+    conn.commit()
 
 
 def registrar_movimentos_recebidos(entradas, saidas):
@@ -538,8 +638,12 @@ def aplicar_dados_sincronizados(dados):
         conn.execute("DELETE FROM usuarios")
         for u in dados.get("usuarios", []):
             conn.execute(
-                "INSERT INTO usuarios (usuario, senha_hash, salt, admin) VALUES (?, ?, ?, ?)",
-                (u["usuario"], u["senha_hash"], u["salt"], 1 if u.get("admin") else 0),
+                "INSERT INTO usuarios (usuario, senha_hash, salt, admin, atualizado_em, deletado) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    u["usuario"], u["senha_hash"], u["salt"], 1 if u.get("admin") else 0,
+                    u.get("atualizado_em") or "", 1 if u.get("deletado") else 0,
+                ),
             )
 
         conn.execute("DELETE FROM entradas")

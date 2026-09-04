@@ -12,6 +12,7 @@ import sqlite3
 import sys
 import threading
 import uuid as uuid_lib
+from datetime import datetime
 
 if getattr(sys, "frozen", False):
     # Executável empacotado (PyInstaller): __file__ aponta para a pasta
@@ -96,16 +97,18 @@ CREATE TABLE clientes (
 );
 
 CREATE TABLE usuarios (
-    usuario    TEXT PRIMARY KEY,
-    senha_hash TEXT NOT NULL,
-    salt       TEXT NOT NULL,
-    admin      INTEGER NOT NULL DEFAULT 0 CHECK (admin IN (0, 1))
+    usuario       TEXT PRIMARY KEY,
+    senha_hash    TEXT NOT NULL,
+    salt          TEXT NOT NULL,
+    admin         INTEGER NOT NULL DEFAULT 0 CHECK (admin IN (0, 1)),
+    atualizado_em TEXT NOT NULL DEFAULT '',
+    deletado      INTEGER NOT NULL DEFAULT 0 CHECK (deletado IN (0, 1))
 );
 
-PRAGMA user_version = 3;
+PRAGMA user_version = 4;
 """
 
-SCHEMA_VERSION_ATUAL = 3
+SCHEMA_VERSION_ATUAL = 4
 
 _local = threading.local()
 
@@ -233,12 +236,13 @@ def _importar_clientes(conn):
 
 
 def _seed_usuarios_iniciais(conn):
+    agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
     for usuario, senha in _USUARIOS_INICIAIS:
         salt = secrets.token_hex(16)
         admin = 1 if usuario.strip().lower() == "pedro" else 0
         conn.execute(
-            "INSERT INTO usuarios (usuario, senha_hash, salt, admin) VALUES (?, ?, ?, ?)",
-            (usuario, hash_senha(senha, salt), salt, admin),
+            "INSERT INTO usuarios (usuario, senha_hash, salt, admin, atualizado_em) VALUES (?, ?, ?, ?, ?)",
+            (usuario, hash_senha(senha, salt), salt, admin, agora),
         )
 
 
@@ -335,6 +339,31 @@ def _migrar_v2_para_v3(conn):
     conn.commit()
 
 
+def _migrar_v3_para_v4(conn):
+    """Adiciona atualizado_em/deletado a usuarios, para que cadastros, edições e
+    remoções de usuário feitos em QUALQUER máquina (não só na principal)
+    sobrevivam à sincronização (controle_estoque-usr-sync).
+
+    Antes, a tabela usuarios inteira vinha da principal a cada sync
+    (`aplicar_dados_sincronizados`) e nada trafegava no sentido contrário —
+    um usuário cadastrado numa secundária era apagado no sync seguinte. Com
+    essas colunas, a principal passa a mesclar (`mesclar_usuarios`) os
+    usuários recebidos no push de uma secundária, mantendo sempre a versão
+    mais recente por usuário (LWW por atualizado_em); remoção também é um
+    soft-delete (campo `deletado`) em vez de DELETE, para que a remoção em si
+    seja uma informação que se propaga pela mesma mescla.
+    """
+    colunas = {row["name"] for row in conn.execute("PRAGMA table_info(usuarios)")}
+    if "atualizado_em" not in colunas:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN atualizado_em TEXT NOT NULL DEFAULT ''")
+        agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        conn.execute("UPDATE usuarios SET atualizado_em = ? WHERE atualizado_em = ''", (agora,))
+    if "deletado" not in colunas:
+        conn.execute("ALTER TABLE usuarios ADD COLUMN deletado INTEGER NOT NULL DEFAULT 0")
+    conn.execute("PRAGMA user_version = 4")
+    conn.commit()
+
+
 def _migrar_schema(conn):
     versao = conn.execute("PRAGMA user_version").fetchone()[0]
     if versao < 2:
@@ -342,6 +371,9 @@ def _migrar_schema(conn):
         versao = 2
     if versao < 3:
         _migrar_v2_para_v3(conn)
+        versao = 3
+    if versao < 4:
+        _migrar_v3_para_v4(conn)
 
 
 def ensure_db():
