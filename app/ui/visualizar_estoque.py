@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from app import storage
-from app.ui.ui_utils import habilitar_busca_por_letra
+from app.ui.ui_utils import ajustar_largura_pelo_conteudo, habilitar_busca_por_letra
 
 COLUNAS_MOVIMENTOS = ("data_hora", "tipo", "codigo", "nome", "quantidade", "cliente", "data_entrega", "usuario")
 HEADERS_MOVIMENTOS = {
@@ -112,6 +112,7 @@ class VisualizarEstoqueFrame(tk.Frame):
             f"{p['nome']} ({p['codigo_barras']})": p["codigo_barras"] for p in produtos
         }
         self.produto_combo.config(values=["todos"] + list(self.produto_map.keys()))
+        ajustar_largura_pelo_conteudo(self.produto_combo, minimo=25, maximo=38)
 
     def _popular_clientes(self):
         """Popula o filtro de cliente com os clientes cadastrados, para casar com o valor exato
@@ -119,6 +120,7 @@ class VisualizarEstoqueFrame(tk.Frame):
         clientes = sorted(storage.listar_clientes(), key=lambda c: (c["nome"].lower(), c["unidade"].lower()))
         nomes = [storage.nome_completo_cliente(c) for c in clientes]
         self.cliente_combo.config(values=["todos"] + nomes)
+        ajustar_largura_pelo_conteudo(self.cliente_combo, minimo=18, maximo=32)
 
     def on_toggle_quantidades_reais(self):
         self._atualizar_estado_filtros()

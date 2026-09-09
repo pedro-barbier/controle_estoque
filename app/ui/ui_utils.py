@@ -29,6 +29,15 @@ def manter_foco(entry, condicao=None):
     entry.bind("<FocusOut>", _ao_perder_foco)
 
 
+def ajustar_largura_pelo_conteudo(combo, minimo, maximo):
+    """Redimensiona `combo` (campo fechado e lista suspensa, que usam a mesma
+    largura no ttk) para caber o maior valor atual, respeitando um mínimo e um
+    máximo — evita que nomes longos (ex.: cliente + unidade) fiquem cortados,
+    sem estourar o layout quando a combobox divide a linha com outros campos."""
+    maior = max((len(v) for v in combo.cget("values")), default=0)
+    combo.configure(width=max(minimo, min(maior + 2, maximo)))
+
+
 def habilitar_busca_por_letra(combo):
     """Ao digitar uma letra num combobox somente-leitura, pula para o primeiro
     valor que começa com essa letra — facilita achar um cliente/produto numa

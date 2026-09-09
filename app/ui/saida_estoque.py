@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
 from app import storage
-from app.ui.ui_utils import habilitar_busca_por_letra, manter_foco
+from app.ui.ui_utils import ajustar_largura_pelo_conteudo, habilitar_busca_por_letra, manter_foco
 
 
 class SaidaEstoqueFrame(tk.Frame):
@@ -101,6 +101,7 @@ class SaidaEstoqueFrame(tk.Frame):
     def _popular_clientes(self):
         clientes = sorted(storage.listar_clientes(), key=lambda c: (c["nome"].lower(), c["unidade"].lower()))
         self.cliente_combo.config(values=[storage.nome_completo_cliente(c) for c in clientes])
+        ajustar_largura_pelo_conteudo(self.cliente_combo, minimo=33, maximo=55)
 
     def refresh_tree(self):
         self.tree.delete(*self.tree.get_children())
