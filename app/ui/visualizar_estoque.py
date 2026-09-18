@@ -1,7 +1,7 @@
 from datetime import datetime
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 from app import storage
 from app.ui.ui_utils import ajustar_largura_pelo_conteudo, habilitar_busca_por_letra
@@ -58,11 +58,6 @@ class VisualizarEstoqueFrame(tk.Frame):
         self.cliente_combo.bind("<<ComboboxSelected>>", lambda e: self.aplicar_filtros())
         habilitar_busca_por_letra(self.cliente_combo)
 
-        tk.Label(filtro_frame, text="Data (DD/MM/AAAA):").grid(row=0, column=4, sticky="e", padx=5, pady=3)
-        self.data_var = tk.StringVar()
-        self.data_entry = tk.Entry(filtro_frame, textvariable=self.data_var, width=14)
-        self.data_entry.grid(row=0, column=5, padx=5, pady=3)
-
         tk.Label(filtro_frame, text="Produto:").grid(row=0, column=6, sticky="e", padx=5, pady=3)
         self.produto_var = tk.StringVar(value="todos")
         self.produto_map = {}
@@ -78,6 +73,16 @@ class VisualizarEstoqueFrame(tk.Frame):
             filtro_frame, text="Quantidades reais", variable=self.quantidades_reais_var,
             command=self.on_toggle_quantidades_reais,
         ).grid(row=1, column=0, columnspan=3, sticky="w", padx=5, pady=(8, 0))
+
+        tk.Label(filtro_frame, text="Data Inicial (DD/MM/AAAA):").grid(row=1, column=3, sticky="e", padx=5, pady=(8, 0))
+        self.data_inicio_var = tk.StringVar()
+        self.data_inicio_entry = tk.Entry(filtro_frame, textvariable=self.data_inicio_var, width=12)
+        self.data_inicio_entry.grid(row=1, column=4, padx=5, pady=(8, 0))
+
+        tk.Label(filtro_frame, text="Data Final (DD/MM/AAAA):").grid(row=1, column=5, sticky="e", padx=5, pady=(8, 0))
+        self.data_fim_var = tk.StringVar()
+        self.data_fim_entry = tk.Entry(filtro_frame, textvariable=self.data_fim_var, width=12)
+        self.data_fim_entry.grid(row=1, column=6, padx=5, pady=(8, 0))
 
         btn_filtro_frame = tk.Frame(self)
         btn_filtro_frame.pack(pady=5)
@@ -98,7 +103,8 @@ class VisualizarEstoqueFrame(tk.Frame):
         self._popular_clientes()
         self.tipo_var.set("todos")
         self.cliente_var.set("todos")
-        self.data_var.set("")
+        self.data_inicio_var.set("")
+        self.data_fim_var.set("")
         self.produto_var.set("todos")
         self.quantidades_reais_var.set(False)
         self._atualizar_estado_filtros()
@@ -130,7 +136,8 @@ class VisualizarEstoqueFrame(tk.Frame):
         desabilitar = self.quantidades_reais_var.get()
         self.tipo_combo.config(state="disabled" if desabilitar else "readonly")
         self.cliente_combo.config(state="disabled" if desabilitar else "readonly")
-        self.data_entry.config(state="disabled" if desabilitar else "normal")
+        self.data_inicio_entry.config(state="disabled" if desabilitar else "normal")
+        self.data_fim_entry.config(state="disabled" if desabilitar else "normal")
 
     def _configurar_colunas(self, columns, headers, widths):
         self.tree["columns"] = columns
@@ -157,10 +164,13 @@ class VisualizarEstoqueFrame(tk.Frame):
         if cliente and cliente != "todos":
             movimentos = [m for m in movimentos if m["cliente"] == cliente]
 
-        data = self.data_var.get().strip()
-        if data:
-            data_iso = self._data_para_iso(data)
-            movimentos = [m for m in movimentos if m["data_hora"].startswith(data_iso)]
+        data_inicio_iso, data_fim_iso, ok = self._obter_intervalo_datas()
+        if not ok:
+            return
+        if data_inicio_iso:
+            movimentos = [m for m in movimentos if m["data_hora"][:10] >= data_inicio_iso]
+        if data_fim_iso:
+            movimentos = [m for m in movimentos if m["data_hora"][:10] <= data_fim_iso]
 
         codigo_produto = self.produto_map.get(self.produto_var.get())
         if codigo_produto:
@@ -198,7 +208,27 @@ class VisualizarEstoqueFrame(tk.Frame):
         try:
             return datetime.strptime(data_str, "%d/%m/%Y").strftime("%Y-%m-%d")
         except ValueError:
-            return "\0"  # formato inválido: não deve casar com nenhuma linha
+            return None
+
+    def _obter_intervalo_datas(self):
+        inicio_str = self.data_inicio_var.get().strip()
+        fim_str = self.data_fim_var.get().strip()
+
+        inicio_iso = self._data_para_iso(inicio_str) if inicio_str else None
+        if inicio_str and inicio_iso is None:
+            messagebox.showwarning("Atenção", "Data Inicial inválida. Use o formato DD/MM/AAAA.")
+            return None, None, False
+
+        fim_iso = self._data_para_iso(fim_str) if fim_str else None
+        if fim_str and fim_iso is None:
+            messagebox.showwarning("Atenção", "Data Final inválida. Use o formato DD/MM/AAAA.")
+            return None, None, False
+
+        if inicio_iso and fim_iso and fim_iso < inicio_iso:
+            messagebox.showwarning("Atenção", "A Data Final não pode ser anterior à Data Inicial.")
+            return None, None, False
+
+        return inicio_iso, fim_iso, True
 
     def on_back_to_menu(self):
         self.controller.show_frame("MainMenu")
