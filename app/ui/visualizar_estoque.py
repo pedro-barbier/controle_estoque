@@ -1,7 +1,9 @@
 from datetime import datetime
 
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
+
+from openpyxl import Workbook
 
 from app import storage
 from app.ui.ui_utils import ajustar_largura_pelo_conteudo, habilitar_busca_por_letra
@@ -88,6 +90,10 @@ class VisualizarEstoqueFrame(tk.Frame):
         btn_filtro_frame.pack(pady=5)
         tk.Button(btn_filtro_frame, text="Filtrar", command=self.aplicar_filtros).pack(side="left", padx=5)
         tk.Button(btn_filtro_frame, text="Limpar Filtros", command=self.limpar_filtros).pack(side="left", padx=5)
+        tk.Button(
+            btn_filtro_frame, text="Exportar para Excel", command=self.exportar_excel,
+            fg="white", bg="#1e8449", activeforeground="white", activebackground="#186a3b",
+        ).pack(side="left", padx=5)
 
         self.tree = ttk.Treeview(self, columns=COLUNAS_MOVIMENTOS, show="headings", height=14)
         self._configurar_colunas(COLUNAS_MOVIMENTOS, HEADERS_MOVIMENTOS, WIDTHS_MOVIMENTOS)
@@ -202,6 +208,42 @@ class VisualizarEstoqueFrame(tk.Frame):
             self.tree.insert("", "end", values=(
                 produto["codigo_barras"], produto["nome"], produto["quantidade"],
             ))
+
+    def exportar_excel(self):
+        """Exporta exatamente o que está na tabela agora (após os filtros
+        aplicados), seja a lista de movimentos ou as quantidades reais."""
+        colunas = self.tree["columns"]
+        linhas = self.tree.get_children()
+        if not linhas:
+            messagebox.showwarning("Atenção", "Não há dados para exportar.")
+            return
+
+        quantidades_reais = self.quantidades_reais_var.get()
+        sufixo = "quantidades" if quantidades_reais else "movimentos"
+        nome_sugerido = f"estoque_{sufixo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        caminho = filedialog.asksaveasfilename(
+            title="Exportar para Excel",
+            defaultextension=".xlsx",
+            filetypes=[("Planilha Excel", "*.xlsx")],
+            initialfile=nome_sugerido,
+        )
+        if not caminho:
+            return
+
+        planilha = Workbook()
+        aba = planilha.active
+        aba.title = "Quantidades" if quantidades_reais else "Movimentos"
+        aba.append([self.tree.heading(col)["text"] for col in colunas])
+        for item_id in linhas:
+            aba.append(list(self.tree.item(item_id)["values"]))
+
+        try:
+            planilha.save(caminho)
+        except OSError as exc:
+            messagebox.showerror("Erro ao exportar", f"Não foi possível salvar o arquivo:\n{exc}")
+            return
+
+        messagebox.showinfo("Sucesso", f"Dados exportados para:\n{caminho}")
 
     @staticmethod
     def _data_para_iso(data_str):

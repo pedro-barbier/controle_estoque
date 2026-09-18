@@ -3,8 +3,8 @@
 set -e
 cd "$(dirname "$0")"
 
-echo "Instalando o PyInstaller (se necessário)..."
-python3 -m pip install --user --upgrade -r requirements-build.txt
+echo "Instalando as dependências (se necessário)..."
+python3 -m pip install --user --upgrade -r requirements.txt -r requirements-build.txt
 
 echo
 echo "Gerando o executável..."

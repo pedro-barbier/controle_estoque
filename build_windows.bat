@@ -7,11 +7,11 @@ echo  Gerando o executavel do Controle de Estoque
 echo ============================================
 echo.
 
-echo Instalando o PyInstaller (se necessario)...
-python -m pip install --upgrade -r requirements-build.txt
+echo Instalando as dependencias (se necessario)...
+python -m pip install --upgrade -r requirements.txt -r requirements-build.txt
 if errorlevel 1 (
     echo.
-    echo ERRO: nao foi possivel instalar o PyInstaller.
+    echo ERRO: nao foi possivel instalar as dependencias.
     echo Verifique se o Python esta instalado e disponivel no PATH.
     pause
     exit /b 1

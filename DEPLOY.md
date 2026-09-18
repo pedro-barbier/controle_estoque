@@ -1,9 +1,10 @@
 # Gerando o executável (Windows)
 
-O aplicativo é escrito em Python puro (Tkinter), sem dependências externas
-para rodar. O único passo extra é empacotá-lo em um `.exe` com o
-PyInstaller, o que precisa ser feito **em uma máquina Windows** (não é
-possível gerar um `.exe` funcional a partir do Linux).
+O aplicativo é escrito em Python (Tkinter), com poucas dependências
+externas (listadas em `requirements.txt`) para rodar. O único passo extra
+é empacotá-lo em um `.exe` com o PyInstaller, o que precisa ser feito **em
+uma máquina Windows** (não é possível gerar um `.exe` funcional a partir
+do Linux).
 
 ## 1. Pré-requisitos na máquina Windows
 

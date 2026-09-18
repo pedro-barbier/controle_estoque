@@ -1,0 +1,2 @@
+# Dependências para rodar o aplicativo (não apenas para gerar o executável).
+openpyxl>=3.1
