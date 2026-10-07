@@ -42,8 +42,6 @@ CLIENTES_HEADERS = ["id", "nome", "unidade"]
 USUARIOS_HEADERS = ["usuario", "senha_hash", "salt"]
 
 _USUARIOS_INICIAIS = [
-    ("Jussara", "@porto498015"),
-    ("Sarah", "S152489"),
     ("Pedro", "#200089pHB"),
 ]
 
