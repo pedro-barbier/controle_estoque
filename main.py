@@ -1,7 +1,11 @@
+import queue
+import sys
 import tkinter as tk
 from tkinter import messagebox
 
-from app import storage, sync, sync_config
+from PIL import ImageTk
+
+from app import bandeja, instancia_unica, recursos, storage, sync, sync_config
 from app.ui.clientes import ClientesFrame
 from app.ui.entrada_estoque import EntradaEstoqueFrame
 from app.ui.login_dialog import LoginDialog
@@ -25,12 +29,22 @@ PROTECTED_FRAMES = {
 ADMIN_FRAMES = {"UsuariosFrame"}
 
 
+TAMANHOS_ICONE_JANELA = (16, 32, 48, 256)
+
+
 class App(tk.Tk):
-    def __init__(self):
+    def __init__(self, fila_comandos):
         super().__init__()
         self.title("Controle de Estoque - Café")
         self.geometry("1080x650")
         self.minsize(950, 550)
+        self._aplicar_icone()
+
+        # Comandos vindos de outras threads (menu da bandeja, segunda instância
+        # pedindo para mostrar a janela) — consumidos só aqui, na thread do Tk.
+        self.fila_comandos = fila_comandos
+        self.bandeja_ativa = False
+        self._ja_avisou_bandeja = False
 
         container = tk.Frame(self)
         container.pack(fill="both", expand=True)
@@ -58,6 +72,85 @@ class App(tk.Tk):
         self.bind("<Return>", self.on_global_enter)
 
         self.show_frame("MainMenu")
+        self.protocol("WM_DELETE_WINDOW", self.on_fechar_janela)
+        self.after(200, self._processar_fila)
+
+    def _aplicar_icone(self):
+        """Usa icon.png na janela, na barra de tarefas e nos diálogos (Toplevel)."""
+        if sys.platform == "win32":
+            # Sem isso, rodando sem empacotar, o Windows agrupa a janela sob o
+            # ícone do python.exe na barra de tarefas.
+            try:
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("PortoDosCafes.ControleEstoque")
+            except Exception:
+                pass
+        imagens = [recursos.carregar_icone(t) for t in TAMANHOS_ICONE_JANELA]
+        if all(imagens):
+            self._fotos_icone = [ImageTk.PhotoImage(img, master=self) for img in imagens]
+            self.iconphoto(True, *self._fotos_icone)
+
+    def _processar_fila(self):
+        try:
+            while True:
+                comando = self.fila_comandos.get_nowait()
+                if comando == "abrir":
+                    self.mostrar_janela()
+                elif comando == "sair":
+                    self.encerrar_completamente()
+                    return
+        except queue.Empty:
+            pass
+        self.after(200, self._processar_fila)
+
+    def on_fechar_janela(self):
+        """Fechar a janela (X ou botão Fechar) não encerra o programa: ele
+        continua na bandeja, para a principal seguir atendendo as secundárias.
+        Sair de vez é pelo menu do ícone na bandeja."""
+        if self.current_frame_name not in (None, "MainMenu"):
+            frame = self.frames[self.current_frame_name]
+            if hasattr(frame, "on_back_to_menu"):
+                frame.on_back_to_menu()  # pede confirmação se houver itens não finalizados
+            if self.current_frame_name != "MainMenu":
+                return  # usuário preferiu continuar na tela
+
+        if not self.bandeja_ativa:
+            self.encerrar_completamente(confirmar=False)
+            return
+
+        self.usuario_logado = None
+        self.withdraw()
+        if not self._ja_avisou_bandeja:
+            self._ja_avisou_bandeja = True
+            bandeja.notificar(
+                "O controle de estoque continua rodando aqui. "
+                "Para encerrar, clique com o botão direito no ícone e escolha Sair."
+            )
+        sync.sincronizar_em_segundo_plano()
+
+    def mostrar_janela(self):
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+        if self.current_frame_name in (None, "MainMenu"):
+            self.show_frame("MainMenu")  # atualiza usuário logado/status do sync
+
+    def encerrar_completamente(self, confirmar=True):
+        papel = sync_config.carregar()["papel"]
+        if confirmar and papel == sync_config.PAPEL_PRINCIPAL:
+            self.mostrar_janela()
+            if not messagebox.askyesno(
+                "Encerrar",
+                "Esta é a máquina principal. Enquanto o programa estiver fechado, as máquinas "
+                "secundárias não conseguem sincronizar.\n\nDeseja encerrar mesmo assim?",
+                icon="warning",
+            ):
+                return
+        sync.parar_sync_periodico()
+        sync.sincronizar_conforme_config()
+        bandeja.parar()
+        instancia_unica.liberar()
+        self.destroy()
 
     def show_frame(self, name):
         if name in PROTECTED_FRAMES and not self.require_login():
@@ -104,27 +197,23 @@ class App(tk.Tk):
             frame.try_advance()
 
 
-def _sincronizar_silenciosamente():
-    """Sincroniza com a máquina principal, se esta máquina for secundária. Chamado ao
-    abrir e ao fechar o app; falhas (ex.: principal offline) não bloqueiam o uso do app."""
-    config = sync_config.carregar()
-    if config["papel"] != sync_config.PAPEL_SECUNDARIA:
-        return
-    try:
-        sync.sincronizar_e_registrar(config["principal_ip"], config["principal_porta"])
-    except sync.ErroSincronizacao:
-        pass
-
-
 if __name__ == "__main__":
+    _fila_comandos = queue.Queue()
+    if not instancia_unica.tentar_ser_primeira(_fila_comandos):
+        sys.exit(0)  # já estava rodando (talvez só na bandeja): a janela dele foi mostrada
+
     storage.ensure_files()
 
     _config_sync = sync_config.carregar()
     if _config_sync["papel"] == sync_config.PAPEL_PRINCIPAL:
         sync.iniciar_servidor(_config_sync["porta_servidor"])
     else:
-        _sincronizar_silenciosamente()
+        # Na secundária, sincroniza ao abrir; falhas (ex.: principal offline) não bloqueiam o uso.
+        sync.sincronizar_conforme_config()
+    sync.iniciar_sync_periodico()
 
-    app = App()
-    app.protocol("WM_DELETE_WINDOW", lambda: (_sincronizar_silenciosamente(), app.destroy()))
+    app = App(_fila_comandos)
+    app.bandeja_ativa = bandeja.iniciar(_fila_comandos, "Controle de Estoque - Porto dos Cafés")
+    if "--bandeja" in sys.argv[1:] and app.bandeja_ativa:
+        app.withdraw()  # iniciado junto com o Windows: fica só na bandeja
     app.mainloop()

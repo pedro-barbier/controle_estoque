@@ -23,11 +23,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from app import storage
+from app import storage, sync_config
 
 TIMEOUT_SEGUNDOS = 5
+INTERVALO_SYNC_AUTOMATICO_SEGUNDOS = 5 * 60
 
 _servidor = None
+_parar_sync_periodico = threading.Event()
 _ultimo_resultado = {"quando": None, "ok": None, "mensagem": ""}
 
 
@@ -121,10 +123,11 @@ def sincronizar(ip, porta):
     if not ip:
         raise ErroSincronizacao("Nenhum IP de máquina principal configurado.")
     base = f"http://{ip}:{porta}"
-    pendentes = storage.movimentos_pendentes()
-    envio = _requisicao_json(f"{base}/sync/push", dados=pendentes)
-    dados_completos = _requisicao_json(f"{base}/sync/full")
-    storage.aplicar_dados_sincronizados(dados_completos)
+    with storage.lock_sincronizacao:
+        pendentes = storage.movimentos_pendentes()
+        envio = _requisicao_json(f"{base}/sync/push", dados=pendentes)
+        dados_completos = _requisicao_json(f"{base}/sync/full")
+        storage.aplicar_dados_sincronizados(dados_completos)
     return {
         "entradas_enviadas": envio.get("entradas_recebidas", 0),
         "saidas_enviadas": envio.get("saidas_recebidas", 0),
@@ -147,3 +150,37 @@ def sincronizar_e_registrar(ip, porta):
     except ErroSincronizacao as exc:
         _ultimo_resultado.update(quando=datetime.now(), ok=False, mensagem=str(exc))
         raise
+
+
+def sincronizar_conforme_config():
+    """Sincroniza com a principal se esta máquina for secundária; falhas são
+    engolidas (ficam em `status_atual`, exibido no menu principal)."""
+    config = sync_config.carregar()
+    if config["papel"] != sync_config.PAPEL_SECUNDARIA:
+        return
+    try:
+        sincronizar_e_registrar(config["principal_ip"], config["principal_porta"])
+    except ErroSincronizacao:
+        pass
+
+
+def sincronizar_em_segundo_plano():
+    """Como `sincronizar_conforme_config`, numa thread, sem travar a janela."""
+    threading.Thread(target=sincronizar_conforme_config, daemon=True).start()
+
+
+def iniciar_sync_periodico(intervalo=INTERVALO_SYNC_AUTOMATICO_SEGUNDOS):
+    """Numa secundária, sincroniza sozinho a cada `intervalo` segundos enquanto
+    o programa estiver rodando (com a janela aberta ou só na bandeja). A
+    config é relida a cada rodada, então não faz nada fora da secundária."""
+    _parar_sync_periodico.clear()
+
+    def _loop():
+        while not _parar_sync_periodico.wait(intervalo):
+            sincronizar_conforme_config()
+
+    threading.Thread(target=_loop, daemon=True).start()
+
+
+def parar_sync_periodico():
+    _parar_sync_periodico.set()

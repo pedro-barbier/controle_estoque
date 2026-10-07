@@ -74,7 +74,7 @@ class MainMenu(tk.Frame):
             command=self.on_reset_estoque,
         )
 
-        tk.Button(self, text="Sair", command=controller.destroy).pack(pady=20)
+        tk.Button(self, text="Fechar", command=controller.on_fechar_janela).pack(pady=20)
 
     def on_show(self):
         self._atualizar_status_usuario()

@@ -1,2 +1,5 @@
 # Dependências para rodar o aplicativo (não apenas para gerar o executável).
 openpyxl>=3.1
+# Ícone na bandeja do sistema (o app continua rodando ao fechar a janela) e ícone próprio (icon.png).
+pystray>=0.19
+Pillow>=10

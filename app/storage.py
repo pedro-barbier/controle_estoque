@@ -1,11 +1,28 @@
 """Leitura e escrita dos dados da aplicação em um banco SQLite local (data/estoque.db)."""
 
+import functools
 import hmac
 import secrets
+import threading
 import uuid as uuid_lib
 from datetime import datetime
 
 from app import db, sync_config
+
+# Numa secundária, a sincronização (app/sync.py) envia o que é local e depois
+# substitui as tabelas inteiras pelo retorno da principal — algo gravado
+# localmente entre esses dois passos seria apagado. Como o sync automático
+# roda numa thread própria, o sync e as escritas que entram no push
+# compartilham este lock: uma gravação feita durante um sync espera ele terminar.
+lock_sincronizacao = threading.RLock()
+
+
+def _com_lock_sincronizacao(funcao):
+    @functools.wraps(funcao)
+    def _envolvida(*args, **kwargs):
+        with lock_sincronizacao:
+            return funcao(*args, **kwargs)
+    return _envolvida
 
 
 def ensure_files():
@@ -70,6 +87,7 @@ def _buscar_usuario_linha_bruta(usuario):
     return conn.execute("SELECT usuario FROM usuarios WHERE lower(usuario) = ?", (usuario_norm,)).fetchone()
 
 
+@_com_lock_sincronizacao
 def criar_usuario(usuario, senha, admin=False):
     """Cria um novo usuário. Levanta ValueError se já houver um usuário ativo com esse nome."""
     ensure_files()
@@ -100,6 +118,7 @@ def criar_usuario(usuario, senha, admin=False):
     conn.commit()
 
 
+@_com_lock_sincronizacao
 def atualizar_usuario(usuario_atual, novo_usuario=None, nova_senha=None, admin=None):
     """Atualiza nome/senha/admin de um usuário existente.
 
@@ -147,6 +166,7 @@ def atualizar_usuario(usuario_atual, novo_usuario=None, nova_senha=None, admin=N
     conn.commit()
 
 
+@_com_lock_sincronizacao
 def remover_usuario(usuario):
     """Remove um usuário (soft-delete: marca `deletado` em vez de apagar a linha),
     para que a remoção em si se propague para as outras máquinas na próxima
@@ -319,6 +339,7 @@ def resetar_estoque():
     conn.commit()
 
 
+@_com_lock_sincronizacao
 def registrar_entrada(itens, usuario):
     """itens: lista de dicts com codigo_barras, nome, quantidade."""
     ensure_files()
@@ -337,6 +358,7 @@ def registrar_entrada(itens, usuario):
     conn.commit()
 
 
+@_com_lock_sincronizacao
 def registrar_saida(itens, cliente, data_entrega, usuario):
     """itens: lista de dicts com codigo_barras, nome, quantidade."""
     ensure_files()
@@ -427,6 +449,7 @@ def listar_movimentos():
 _TABELA_POR_TIPO = {"entrada": "entradas", "saida": "saidas"}
 
 
+@_com_lock_sincronizacao
 def excluir_movimentos(movimentos, usuario):
     """Exclui entradas/saídas do estoque. `movimentos` é uma lista de dicts com
     "tipo" ("entrada"/"saida") e "uuid". Retorna quantas foram excluídas.

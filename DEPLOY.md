@@ -44,7 +44,28 @@ Para migrar os dados para outra máquina, basta copiar a pasta
 `C:\ControleEstoqueCafe\` inteira (executável + pasta `data`, agora com um
 único arquivo `estoque.db` em vez de vários `.csv`).
 
-## 4. Aviso do Windows ao abrir pela primeira vez
+## 4. O programa fica na bandeja do sistema
+
+Fechar a janela (no **X** ou no botão **Fechar**) **não encerra** o
+programa: ele continua rodando escondido, com o ícone na bandeja do sistema
+(perto do relógio — se não aparecer, clique na setinha **^** ao lado dos
+ícones). Isso é o que permite que a máquina principal continue atendendo as
+secundárias mesmo sem a janela aberta.
+
+- **Reabrir a janela:** clique (ou dê dois cliques) no ícone da bandeja, ou
+  simplesmente abra o atalho da área de trabalho de novo — o programa não
+  abre uma segunda cópia, só mostra a janela que já estava rodando.
+- **Encerrar de vez:** clique com o botão direito no ícone → **Sair
+  (encerrar completamente)**. Na máquina principal, o programa avisa que as
+  secundárias deixarão de sincronizar enquanto ele estiver fechado.
+- Ao fechar a janela, o usuário logado é deslogado — a próxima ação que
+  exigir usuário pede login de novo.
+- **Iniciar com o Windows:** em **Configurar Sincronização**, marque
+  "Iniciar automaticamente com o Windows" para o programa abrir sozinho, já
+  na bandeja, sempre que o computador for ligado. Recomendado na máquina
+  principal.
+
+## 5. Aviso do Windows ao abrir pela primeira vez
 
 Como o executável não tem uma assinatura digital paga, o Windows
 Defender SmartScreen pode mostrar um aviso "Windows protegeu o
@@ -56,7 +77,7 @@ não assinado, não é um problema do aplicativo. Para abrir:
 
 Isso só aparece uma vez por máquina.
 
-## 5. Solução de problemas
+## 6. Solução de problemas
 
 **Erro faltando `tcl90.dll` / `tk90.dll` (ou `tcl86t.dll` / `tk86t.dll`)
 ao gerar ou abrir o executável:** significa que o PyInstaller não
@@ -69,6 +90,7 @@ raro em instalações padrão do python.org, mas se acontecer:
 2. Rode o build manualmente adicionando-os:
    ```
    python -m PyInstaller --onefile --windowed --name ControleEstoqueCafe ^
+     --icon icon.png --add-data "icon.png;." --hidden-import pystray._win32 ^
      --add-binary "C:\Caminho\Para\Python\DLLs\tcl90.dll;." ^
      --add-binary "C:\Caminho\Para\Python\DLLs\tk90.dll;." ^
      main.py
@@ -79,7 +101,7 @@ pelo PyInstaller às vezes são sinalizados por falso-positivo (comum em
 antivírus mais agressivos). Adicione uma exceção para a pasta
 `C:\ControleEstoqueCafe\` no antivírus.
 
-## 6. Sincronizando várias máquinas pelo wifi da loja
+## 7. Sincronizando várias máquinas pelo wifi da loja
 
 O programa suporta ter uma máquina **Principal** (onde as entradas/saídas de
 estoque são registradas) e outras máquinas **Secundárias** na mesma rede
@@ -96,7 +118,8 @@ Isso é opcional — se a loja usa só uma máquina, não precisa configurar nad
    já usar essa porta para outra coisa).
 3. Anote o **IP desta máquina**, mostrado na tela (algo como
    `192.168.15.48`) — vai ser usado para configurar as secundárias.
-4. Salve e reinicie o programa.
+4. Salve e reinicie o programa (botão direito no ícone da bandeja → **Sair**,
+   e abra de novo).
 5. Na primeira vez, o **Firewall do Windows** deve perguntar se permite o
    programa receber conexões na rede — clique em **Permitir acesso**
    (redes privadas/domésticas). Se isso for negado sem querer, as
@@ -113,10 +136,12 @@ Isso é opcional — se a loja usa só uma máquina, não precisa configurar nad
 4. Opcionalmente, dê um nome a essa máquina (ex.: "Caixa 2") — aparece no
    histórico de movimentações para identificar de onde veio cada
    lançamento.
-5. Salve e reinicie o programa.
+5. Salve e reinicie o programa (botão direito no ícone da bandeja → **Sair**,
+   e abra de novo).
 
-A partir daí, cada máquina secundária sincroniza automaticamente ao abrir e
-ao fechar o programa, e também a qualquer momento pelo botão
+A partir daí, cada máquina secundária sincroniza automaticamente ao abrir,
+ao fechar a janela, a cada 5 minutos enquanto o programa estiver rodando
+(mesmo só na bandeja) e ao encerrar o programa, e também a qualquer momento pelo botão
 **Sincronizar Agora** no menu principal. Se a máquina principal estiver
 desligada ou fora da rede no momento, a sincronização falha silenciosamente
 (ou mostra o erro, se veio do botão) e o programa continua funcionando

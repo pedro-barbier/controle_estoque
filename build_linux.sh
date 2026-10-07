@@ -19,7 +19,9 @@ for f in "$PY_PREFIX"/lib/libtcl9*.so "$PY_PREFIX"/lib/libtcl9*.so.*; do
     EXTRA_ARGS+=(--add-binary "$f:.")
 done
 
-python3 -m PyInstaller --onefile --windowed --name ControleEstoqueCafe --clean "${EXTRA_ARGS[@]}" main.py
+python3 -m PyInstaller --onefile --windowed --name ControleEstoqueCafe --clean "${EXTRA_ARGS[@]}" \
+    --icon icon.png --add-data "icon.png:." \
+    --hidden-import pystray._xorg --hidden-import pystray._appindicator main.py
 
 echo
 echo "Pronto! Executável gerado em: dist/ControleEstoqueCafe"

@@ -19,7 +19,8 @@ if errorlevel 1 (
 
 echo.
 echo Gerando o executavel (isso pode levar um minuto)...
-python -m PyInstaller --onefile --windowed --name ControleEstoqueCafe --clean main.py
+python -m PyInstaller --onefile --windowed --name ControleEstoqueCafe --clean ^
+    --icon icon.png --add-data "icon.png;." --hidden-import pystray._win32 main.py
 if errorlevel 1 (
     echo.
     echo ERRO: falha ao gerar o executavel. Veja a mensagem acima.

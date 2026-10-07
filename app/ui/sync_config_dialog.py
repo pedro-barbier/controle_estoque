@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import font as tkfont, messagebox
 
-from app import sync, sync_config
+from app import inicializacao, sync, sync_config
 
 
 class SyncConfigDialog(tk.Toplevel):
@@ -100,6 +100,15 @@ class SyncConfigDialog(tk.Toplevel):
         self.frame_secundaria.grid(row=linha, column=0, columnspan=2, padx=20, pady=(10, 0), sticky="w")
         linha += 1
 
+        # Fica fora de frame_principal/frame_secundaria: vale para qualquer papel.
+        self.iniciar_com_windows_var = tk.BooleanVar(value=inicializacao.esta_ativo())
+        if inicializacao.disponivel():
+            tk.Checkbutton(
+                conteudo, text="Iniciar automaticamente com o Windows (já na bandeja)",
+                variable=self.iniciar_com_windows_var,
+            ).grid(row=linha, column=0, columnspan=2, sticky="w", padx=20, pady=(15, 0))
+            linha += 1
+
         self.status_label = tk.Label(conteudo, text="", fg="red")
         self.status_label.grid(row=linha, column=0, columnspan=2, pady=(10, 20))
         linha += 1
@@ -165,18 +174,32 @@ class SyncConfigDialog(tk.Toplevel):
             self.status_label.config(text="Informe o IP da máquina principal.")
             return
 
-        sync_config.salvar({
+        nova_config = {
             "papel": papel,
             "porta_servidor": porta_servidor,
             "principal_ip": self.principal_ip_var.get().strip(),
             "principal_porta": principal_porta,
             "nome_maquina": self.nome_maquina_var.get().strip(),
-        })
+        }
+        mudou_sync = nova_config != {chave: sync_config.carregar().get(chave) for chave in nova_config}
+
+        if inicializacao.disponivel():
+            try:
+                inicializacao.definir(self.iniciar_com_windows_var.get())
+            except OSError as exc:
+                self.status_label.config(text=f"Não foi possível alterar a inicialização com o Windows: {exc}")
+                return
+
+        sync_config.salvar(nova_config)
         self.resultado_salvo = True
-        messagebox.showinfo(
-            "Sincronização", "Configuração salva. É preciso reiniciar o programa para aplicar a mudança.",
-            parent=self,
-        )
+        mensagem = "Configuração salva."
+        if mudou_sync:
+            # Fechar a janela só esconde o programa na bandeja — reiniciar exige sair por lá.
+            mensagem += (
+                "\n\nPara aplicar a mudança na sincronização, encerre o programa pelo ícone da "
+                "bandeja (botão direito → Sair) e abra-o novamente."
+            )
+        messagebox.showinfo("Sincronização", mensagem, parent=self)
         self.destroy()
 
     def on_cancel(self, event=None):
