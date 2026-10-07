@@ -67,6 +67,7 @@ class _SyncHandler(BaseHTTPRequestHandler):
             self._responder_json(400, {"erro": "corpo inválido"})
             return
         storage.mesclar_usuarios(dados.get("usuarios", []))
+        storage.aplicar_exclusoes_recebidas(dados.get("exclusoes", []))
         resultado = storage.registrar_movimentos_recebidos(dados.get("entradas", []), dados.get("saidas", []))
         self._responder_json(200, resultado)
 

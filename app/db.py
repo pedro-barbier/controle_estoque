@@ -103,10 +103,18 @@ CREATE TABLE usuarios (
     deletado      INTEGER NOT NULL DEFAULT 0 CHECK (deletado IN (0, 1))
 );
 
-PRAGMA user_version = 4;
+CREATE TABLE movimentos_excluidos (
+    uuid         TEXT PRIMARY KEY,
+    tipo         TEXT NOT NULL CHECK (tipo IN ('entrada', 'saida')),
+    excluido_em  TEXT NOT NULL,
+    usuario      TEXT NOT NULL,
+    sincronizado INTEGER NOT NULL DEFAULT 1
+);
+
+PRAGMA user_version = 5;
 """
 
-SCHEMA_VERSION_ATUAL = 4
+SCHEMA_VERSION_ATUAL = 5
 
 _local = threading.local()
 
@@ -362,6 +370,29 @@ def _migrar_v3_para_v4(conn):
     conn.commit()
 
 
+def _migrar_v4_para_v5(conn):
+    """Cria movimentos_excluidos, suporte à exclusão de entradas/saídas por
+    administradores na visualização de estoque (controle_estoque-pdo).
+
+    Guarda o uuid de cada movimentação excluída (e quem excluiu, quando) em vez
+    de só apagar a linha: numa secundária, a exclusão precisa ser enviada à
+    principal no próximo push, senão a substituição total do sync seguinte
+    (`aplicar_dados_sincronizados`) traria o registro de volta. Na principal,
+    a lista impede que uma secundária reenvie e "ressuscite" um registro já
+    excluído (ver `registrar_movimentos_recebidos`).
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS movimentos_excluidos ("
+        "uuid TEXT PRIMARY KEY, "
+        "tipo TEXT NOT NULL CHECK (tipo IN ('entrada', 'saida')), "
+        "excluido_em TEXT NOT NULL, "
+        "usuario TEXT NOT NULL, "
+        "sincronizado INTEGER NOT NULL DEFAULT 1)"
+    )
+    conn.execute("PRAGMA user_version = 5")
+    conn.commit()
+
+
 def _migrar_schema(conn):
     versao = conn.execute("PRAGMA user_version").fetchone()[0]
     if versao < 2:
@@ -372,6 +403,9 @@ def _migrar_schema(conn):
         versao = 3
     if versao < 4:
         _migrar_v3_para_v4(conn)
+        versao = 4
+    if versao < 5:
+        _migrar_v4_para_v5(conn)
 
 
 def ensure_db():

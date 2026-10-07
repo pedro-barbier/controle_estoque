@@ -6,6 +6,7 @@ from tkinter import filedialog, messagebox, ttk
 from openpyxl import Workbook
 
 from app import storage
+from app.ui.confirmar_exclusao_dialog import ConfirmarExclusaoDialog
 from app.ui.ui_utils import ajustar_largura_pelo_conteudo, habilitar_busca_por_letra
 
 COLUNAS_MOVIMENTOS = ("data_hora", "tipo", "codigo", "nome", "quantidade", "cliente", "data_entrega", "usuario")
@@ -94,8 +95,16 @@ class VisualizarEstoqueFrame(tk.Frame):
             btn_filtro_frame, text="Exportar para Excel", command=self.exportar_excel,
             fg="white", bg="#1e8449", activeforeground="white", activebackground="#186a3b",
         ).pack(side="left", padx=5)
+        tk.Button(
+            btn_filtro_frame, text="Excluir Selecionados", command=self.on_excluir_selecionados,
+            fg="white", bg="#b03a2e", activeforeground="white", activebackground="#922b21",
+        ).pack(side="left", padx=5)
 
-        self.tree = ttk.Treeview(self, columns=COLUNAS_MOVIMENTOS, show="headings", height=14)
+        # selectmode="extended": Ctrl+clique (e Shift+clique) seleciona vários registros.
+        self.tree = ttk.Treeview(
+            self, columns=COLUNAS_MOVIMENTOS, show="headings", height=14, selectmode="extended",
+        )
+        self.movimentos_por_item = {}
         self._configurar_colunas(COLUNAS_MOVIMENTOS, HEADERS_MOVIMENTOS, WIDTHS_MOVIMENTOS)
         self.tree.pack(pady=10, fill="both", expand=True, padx=20)
 
@@ -183,8 +192,9 @@ class VisualizarEstoqueFrame(tk.Frame):
             movimentos = [m for m in movimentos if m["codigo_barras"] == codigo_produto]
 
         self.tree.delete(*self.tree.get_children())
+        self.movimentos_por_item = {}
         for m in movimentos:
-            self.tree.insert("", "end", values=(
+            item_id = self.tree.insert("", "end", values=(
                 m["data_hora"],
                 "Entrada" if m["tipo"] == "entrada" else "Saída",
                 m["codigo_barras"],
@@ -194,6 +204,7 @@ class VisualizarEstoqueFrame(tk.Frame):
                 m["data_entrega"],
                 m["usuario"],
             ))
+            self.movimentos_por_item[item_id] = m
 
     def _mostrar_quantidades_reais(self):
         self._configurar_colunas(COLUNAS_REAIS, HEADERS_REAIS, WIDTHS_REAIS)
@@ -204,6 +215,7 @@ class VisualizarEstoqueFrame(tk.Frame):
             quantidades = [q for q in quantidades if q["codigo_barras"] == codigo_produto]
 
         self.tree.delete(*self.tree.get_children())
+        self.movimentos_por_item = {}
         for produto in quantidades:
             self.tree.insert("", "end", values=(
                 produto["codigo_barras"], produto["nome"], produto["quantidade"],
@@ -244,6 +256,39 @@ class VisualizarEstoqueFrame(tk.Frame):
             return
 
         messagebox.showinfo("Sucesso", f"Dados exportados para:\n{caminho}")
+
+    def on_excluir_selecionados(self):
+        if self.quantidades_reais_var.get():
+            messagebox.showerror(
+                "Exclusão",
+                "A exclusão só está disponível na lista de entradas e saídas.\n"
+                "Desmarque \"Quantidades reais\" para selecionar os registros.",
+            )
+            return
+
+        selecionados = [self.movimentos_por_item[i] for i in self.tree.selection() if i in self.movimentos_por_item]
+        if not selecionados:
+            messagebox.showerror(
+                "Exclusão",
+                "Nenhum registro selecionado.\n"
+                "Clique em um registro (ou use Ctrl+clique para selecionar vários) e tente novamente.",
+            )
+            return
+
+        if not self.controller.require_login():
+            return
+        if not self.controller.usuario_e_admin():
+            messagebox.showerror("Acesso negado", "Apenas administradores podem excluir registros do estoque.")
+            return
+
+        dialog = ConfirmarExclusaoDialog(self.controller, selecionados)
+        self.wait_window(dialog)
+        if not dialog.confirmado:
+            return
+
+        excluidos = storage.excluir_movimentos(selecionados, self.controller.usuario_logado)
+        self.aplicar_filtros()
+        messagebox.showinfo("Exclusão", f"{excluidos} registro(s) excluído(s) do estoque.")
 
     @staticmethod
     def _data_para_iso(data_str):

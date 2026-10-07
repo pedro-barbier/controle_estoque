@@ -358,9 +358,10 @@ def registrar_saida(itens, cliente, data_entrega, usuario):
 def listar_entradas():
     ensure_files()
     conn = db.get_connection()
-    rows = conn.execute("SELECT data_hora, codigo_barras, nome, quantidade, usuario FROM entradas").fetchall()
+    rows = conn.execute("SELECT uuid, data_hora, codigo_barras, nome, quantidade, usuario FROM entradas").fetchall()
     return [
         {
+            "uuid": row["uuid"],
             "data_hora": row["data_hora"],
             "codigo_barras": row["codigo_barras"],
             "nome": row["nome"],
@@ -375,10 +376,11 @@ def listar_saidas():
     ensure_files()
     conn = db.get_connection()
     rows = conn.execute(
-        "SELECT data_hora, codigo_barras, nome, quantidade, cliente, data_entrega, usuario FROM saidas"
+        "SELECT uuid, data_hora, codigo_barras, nome, quantidade, cliente, data_entrega, usuario FROM saidas"
     ).fetchall()
     return [
         {
+            "uuid": row["uuid"],
             "data_hora": row["data_hora"],
             "codigo_barras": row["codigo_barras"],
             "nome": row["nome"],
@@ -396,6 +398,7 @@ def listar_movimentos():
     movimentos = []
     for item in listar_entradas():
         movimentos.append({
+            "uuid": item["uuid"],
             "data_hora": item["data_hora"],
             "tipo": "entrada",
             "codigo_barras": item["codigo_barras"],
@@ -407,6 +410,7 @@ def listar_movimentos():
         })
     for item in listar_saidas():
         movimentos.append({
+            "uuid": item["uuid"],
             "data_hora": item["data_hora"],
             "tipo": "saida",
             "codigo_barras": item["codigo_barras"],
@@ -418,6 +422,36 @@ def listar_movimentos():
         })
     movimentos.sort(key=lambda m: m["data_hora"], reverse=True)
     return movimentos
+
+
+_TABELA_POR_TIPO = {"entrada": "entradas", "saida": "saidas"}
+
+
+def excluir_movimentos(movimentos, usuario):
+    """Exclui entradas/saídas do estoque. `movimentos` é uma lista de dicts com
+    "tipo" ("entrada"/"saida") e "uuid". Retorna quantas foram excluídas.
+
+    Além de apagar a linha, registra o uuid em movimentos_excluidos (ver
+    `db._migrar_v4_para_v5`): numa secundária fica pendente de envio à
+    principal (`movimentos_pendentes`), para a exclusão não ser desfeita no
+    próximo sync.
+    """
+    ensure_files()
+    conn = db.get_connection()
+    agora = _timestamp_atual()
+    sincronizado = 0 if sync_config.carregar()["papel"] == sync_config.PAPEL_SECUNDARIA else 1
+    excluidos = 0
+    for mov in movimentos:
+        tabela = _TABELA_POR_TIPO[mov["tipo"]]
+        cursor = conn.execute(f"DELETE FROM {tabela} WHERE uuid = ?", (mov["uuid"],))
+        excluidos += cursor.rowcount
+        conn.execute(
+            "INSERT OR REPLACE INTO movimentos_excluidos (uuid, tipo, excluido_em, usuario, sincronizado) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (mov["uuid"], mov["tipo"], agora, usuario, sincronizado),
+        )
+    conn.commit()
+    return excluidos
 
 
 def calcular_quantidades_reais():
@@ -519,6 +553,9 @@ def movimentos_pendentes():
     lista com a dela mantendo, por usuário, a versão com atualizado_em mais
     recente (ver `mesclar_usuarios`). É assim que um usuário cadastrado numa
     secundária deixa de ser apagado no sync seguinte.
+
+    Exclusões de entradas/saídas feitas localmente por um administrador vão
+    em "exclusoes" (ver `excluir_movimentos` e `aplicar_exclusoes_recebidas`).
     """
     ensure_files()
     conn = db.get_connection()
@@ -530,7 +567,29 @@ def movimentos_pendentes():
             _saida_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM saidas WHERE sincronizado = 0")
         ],
         "usuarios": [_usuario_row_to_sync_dict(r) for r in conn.execute("SELECT * FROM usuarios")],
+        "exclusoes": [
+            {"uuid": r["uuid"], "tipo": r["tipo"], "excluido_em": r["excluido_em"], "usuario": r["usuario"]}
+            for r in conn.execute("SELECT * FROM movimentos_excluidos WHERE sincronizado = 0")
+        ],
     }
+
+
+def aplicar_exclusoes_recebidas(exclusoes):
+    """Aplica exclusões de entradas/saídas feitas numa máquina secundária (lado
+    principal, POST /sync/push). Idempotente, como `registrar_movimentos_recebidos`."""
+    ensure_files()
+    conn = db.get_connection()
+    for item in exclusoes:
+        tabela = _TABELA_POR_TIPO.get(item.get("tipo"))
+        if not tabela or not item.get("uuid"):
+            continue
+        conn.execute(f"DELETE FROM {tabela} WHERE uuid = ?", (item["uuid"],))
+        conn.execute(
+            "INSERT OR IGNORE INTO movimentos_excluidos (uuid, tipo, excluido_em, usuario, sincronizado) "
+            "VALUES (?, ?, ?, ?, 1)",
+            (item["uuid"], item["tipo"], item.get("excluido_em") or _timestamp_atual(), item.get("usuario") or ""),
+        )
+    conn.commit()
 
 
 def mesclar_usuarios(usuarios_recebidos):
@@ -575,9 +634,14 @@ def registrar_movimentos_recebidos(entradas, saidas):
     máquina secundária reenvia tudo que ainda não confirmou como recebido,
     então o mesmo lote pode chegar mais de uma vez (ex.: se a conexão cair
     depois do envio mas antes da secundária terminar de processar a resposta).
+    Uma movimentação já excluída por um administrador também é ignorada, para
+    que um reenvio desses não traga de volta um registro excluído.
     """
     ensure_files()
     conn = db.get_connection()
+    excluidos = {r["uuid"] for r in conn.execute("SELECT uuid FROM movimentos_excluidos")}
+    entradas = [item for item in entradas if item["uuid"] not in excluidos]
+    saidas = [item for item in saidas if item["uuid"] not in excluidos]
     antes_entradas = conn.execute("SELECT COUNT(*) FROM entradas").fetchone()[0]
     antes_saidas = conn.execute("SELECT COUNT(*) FROM saidas").fetchone()[0]
     for item in entradas:
@@ -664,6 +728,9 @@ def aplicar_dados_sincronizados(dados):
                 (s["uuid"], s["data_hora"], s["codigo_barras"], s["nome"], s["quantidade"], s["cliente"],
                  s["data_entrega"], s["usuario"], s.get("origem", "")),
             )
+
+        # As exclusões pendentes já foram enviadas no push que precede esta chamada.
+        conn.execute("UPDATE movimentos_excluidos SET sincronizado = 1 WHERE sincronizado = 0")
 
         conn.commit()
     finally:
