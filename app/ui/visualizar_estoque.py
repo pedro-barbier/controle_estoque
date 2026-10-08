@@ -9,10 +9,11 @@ from app import storage
 from app.ui.confirmar_exclusao_dialog import ConfirmarExclusaoDialog
 from app.ui.ui_utils import ajustar_largura_pelo_conteudo, habilitar_busca_por_letra
 
-COLUNAS_MOVIMENTOS = ("data_hora", "tipo", "codigo", "nome", "quantidade", "cliente", "data_entrega", "usuario")
+COLUNAS_MOVIMENTOS = ("data_hora", "tipo", "origem", "codigo", "nome", "quantidade", "cliente", "data_entrega", "usuario")
 HEADERS_MOVIMENTOS = {
     "data_hora": "Data/Hora",
     "tipo": "Tipo",
+    "origem": "Origem",
     "codigo": "Código",
     "nome": "Nome",
     "quantidade": "Qtd.",
@@ -21,7 +22,7 @@ HEADERS_MOVIMENTOS = {
     "usuario": "Usuário",
 }
 WIDTHS_MOVIMENTOS = {
-    "data_hora": 130, "tipo": 70, "codigo": 110, "nome": 200,
+    "data_hora": 130, "tipo": 70, "origem": 110, "codigo": 110, "nome": 200,
     "quantidade": 55, "cliente": 130, "data_entrega": 90, "usuario": 100,
 }
 
@@ -137,7 +138,7 @@ class VisualizarEstoqueFrame(tk.Frame):
 
     def _popular_clientes(self):
         """Popula o filtro de cliente com os clientes cadastrados, para casar com o valor exato
-        gravado na saída de estoque (evitando divergência de nomes)."""
+        gravado na saída de estoque e nas entradas de Retorno/Troca (evitando divergência de nomes)."""
         clientes = sorted(storage.listar_clientes(), key=lambda c: (c["nome"].lower(), c["unidade"].lower()))
         nomes = [storage.nome_completo_cliente(c) for c in clientes]
         self.cliente_combo.config(values=["todos"] + nomes)
@@ -197,6 +198,7 @@ class VisualizarEstoqueFrame(tk.Frame):
             item_id = self.tree.insert("", "end", values=(
                 m["data_hora"],
                 "Entrada" if m["tipo"] == "entrada" else "Saída",
+                m["origem_entrada"],
                 m["codigo_barras"],
                 m["nome"],
                 m["quantidade"],

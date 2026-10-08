@@ -65,7 +65,9 @@ CREATE TABLE entradas (
     quantidade    INTEGER NOT NULL,
     usuario       TEXT NOT NULL,
     origem        TEXT NOT NULL DEFAULT '',
-    sincronizado  INTEGER NOT NULL DEFAULT 1
+    sincronizado  INTEGER NOT NULL DEFAULT 1,
+    origem_entrada TEXT NOT NULL DEFAULT '',
+    cliente       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX idx_entradas_data_hora     ON entradas(data_hora);
 CREATE INDEX idx_entradas_codigo_barras ON entradas(codigo_barras);
@@ -111,10 +113,10 @@ CREATE TABLE movimentos_excluidos (
     sincronizado INTEGER NOT NULL DEFAULT 1
 );
 
-PRAGMA user_version = 5;
+PRAGMA user_version = 6;
 """
 
-SCHEMA_VERSION_ATUAL = 5
+SCHEMA_VERSION_ATUAL = 6
 
 _local = threading.local()
 
@@ -393,6 +395,21 @@ def _migrar_v4_para_v5(conn):
     conn.commit()
 
 
+def _migrar_v5_para_v6(conn):
+    """Adiciona origem_entrada/cliente a entradas (controle_estoque-cbn): de
+    onde veio a entrada (Reabastecimento, Retorno ou Troca) e, em Retorno ou
+    Troca, o cliente que devolveu ou pediu a troca. Não confundir com a coluna
+    `origem`, que guarda o nome da máquina para a sincronização. Entradas
+    gravadas antes desta migração ficam com os dois campos vazios."""
+    colunas = {row["name"] for row in conn.execute("PRAGMA table_info(entradas)")}
+    if "origem_entrada" not in colunas:
+        conn.execute("ALTER TABLE entradas ADD COLUMN origem_entrada TEXT NOT NULL DEFAULT ''")
+    if "cliente" not in colunas:
+        conn.execute("ALTER TABLE entradas ADD COLUMN cliente TEXT NOT NULL DEFAULT ''")
+    conn.execute("PRAGMA user_version = 6")
+    conn.commit()
+
+
 def _migrar_schema(conn):
     versao = conn.execute("PRAGMA user_version").fetchone()[0]
     if versao < 2:
@@ -406,6 +423,9 @@ def _migrar_schema(conn):
         versao = 4
     if versao < 5:
         _migrar_v4_para_v5(conn)
+        versao = 5
+    if versao < 6:
+        _migrar_v5_para_v6(conn)
 
 
 def ensure_db():

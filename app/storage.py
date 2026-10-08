@@ -16,6 +16,11 @@ from app import db, sync_config
 # compartilham este lock: uma gravação feita durante um sync espera ele terminar.
 lock_sincronizacao = threading.RLock()
 
+# De onde veio uma entrada de estoque. Em Retorno e Troca, a entrada também
+# registra o cliente que devolveu o produto ou pediu a troca.
+ORIGENS_ENTRADA = ("Reabastecimento", "Retorno", "Troca")
+ORIGENS_COM_CLIENTE = ("Retorno", "Troca")
+
 
 def _com_lock_sincronizacao(funcao):
     @functools.wraps(funcao)
@@ -340,9 +345,15 @@ def resetar_estoque():
 
 
 @_com_lock_sincronizacao
-def registrar_entrada(itens, usuario):
-    """itens: lista de dicts com codigo_barras, nome, quantidade."""
+def registrar_entrada(itens, origem_entrada, cliente, usuario):
+    """itens: lista de dicts com codigo_barras, nome, quantidade.
+
+    origem_entrada: um de ORIGENS_ENTRADA. cliente só é gravado quando a
+    origem está em ORIGENS_COM_CLIENTE.
+    """
     ensure_files()
+    if origem_entrada not in ORIGENS_COM_CLIENTE:
+        cliente = ""
     conn = db.get_connection()
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     origem = sync_config.nome_desta_maquina()
@@ -350,10 +361,11 @@ def registrar_entrada(itens, usuario):
     for item in itens:
         conn.execute(
             "INSERT INTO entradas "
-            "(uuid, data_hora, codigo_barras, nome, quantidade, usuario, origem, sincronizado) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(uuid, data_hora, codigo_barras, nome, quantidade, usuario, origem, sincronizado, "
+            "origem_entrada, cliente) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (uuid_lib.uuid4().hex, agora, item["codigo_barras"], item["nome"], item["quantidade"],
-             usuario, origem, sincronizado),
+             usuario, origem, sincronizado, origem_entrada, cliente),
         )
     conn.commit()
 
@@ -380,7 +392,9 @@ def registrar_saida(itens, cliente, data_entrega, usuario):
 def listar_entradas():
     ensure_files()
     conn = db.get_connection()
-    rows = conn.execute("SELECT uuid, data_hora, codigo_barras, nome, quantidade, usuario FROM entradas").fetchall()
+    rows = conn.execute(
+        "SELECT uuid, data_hora, codigo_barras, nome, quantidade, usuario, origem_entrada, cliente FROM entradas"
+    ).fetchall()
     return [
         {
             "uuid": row["uuid"],
@@ -389,6 +403,8 @@ def listar_entradas():
             "nome": row["nome"],
             "quantidade": str(row["quantidade"]),
             "usuario": row["usuario"],
+            "origem_entrada": row["origem_entrada"],
+            "cliente": row["cliente"],
         }
         for row in rows
     ]
@@ -423,10 +439,11 @@ def listar_movimentos():
             "uuid": item["uuid"],
             "data_hora": item["data_hora"],
             "tipo": "entrada",
+            "origem_entrada": item["origem_entrada"],
             "codigo_barras": item["codigo_barras"],
             "nome": item["nome"],
             "quantidade": item["quantidade"],
-            "cliente": "",
+            "cliente": item["cliente"],
             "data_entrega": "",
             "usuario": item.get("usuario", ""),
         })
@@ -435,6 +452,7 @@ def listar_movimentos():
             "uuid": item["uuid"],
             "data_hora": item["data_hora"],
             "tipo": "saida",
+            "origem_entrada": "",
             "codigo_barras": item["codigo_barras"],
             "nome": item["nome"],
             "quantidade": item["quantidade"],
@@ -519,6 +537,8 @@ def _entrada_row_to_sync_dict(row):
         "quantidade": row["quantidade"],
         "usuario": row["usuario"],
         "origem": row["origem"],
+        "origem_entrada": row["origem_entrada"],
+        "cliente": row["cliente"],
     }
 
 
@@ -670,10 +690,12 @@ def registrar_movimentos_recebidos(entradas, saidas):
     for item in entradas:
         conn.execute(
             "INSERT OR IGNORE INTO entradas "
-            "(uuid, data_hora, codigo_barras, nome, quantidade, usuario, origem, sincronizado) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+            "(uuid, data_hora, codigo_barras, nome, quantidade, usuario, origem, sincronizado, "
+            "origem_entrada, cliente) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
             (item["uuid"], item["data_hora"], item["codigo_barras"], item["nome"],
-             int(item["quantidade"]), item["usuario"], item.get("origem", "")),
+             int(item["quantidade"]), item["usuario"], item.get("origem", ""),
+             item.get("origem_entrada", ""), item.get("cliente", "")),
         )
     for item in saidas:
         conn.execute(
@@ -736,10 +758,12 @@ def aplicar_dados_sincronizados(dados):
         conn.execute("DELETE FROM entradas")
         for e in dados.get("entradas", []):
             conn.execute(
-                "INSERT INTO entradas (uuid, data_hora, codigo_barras, nome, quantidade, usuario, origem, sincronizado) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+                "INSERT INTO entradas "
+                "(uuid, data_hora, codigo_barras, nome, quantidade, usuario, origem, sincronizado, "
+                "origem_entrada, cliente) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
                 (e["uuid"], e["data_hora"], e["codigo_barras"], e["nome"], e["quantidade"], e["usuario"],
-                 e.get("origem", "")),
+                 e.get("origem", ""), e.get("origem_entrada", ""), e.get("cliente", "")),
             )
 
         conn.execute("DELETE FROM saidas")

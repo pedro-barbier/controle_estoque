@@ -1,10 +1,11 @@
 import tkinter as tk
 from tkinter import font as tkfont, ttk
 
-COLUNAS = ("data_hora", "tipo", "codigo", "nome", "quantidade", "cliente", "usuario")
+COLUNAS = ("data_hora", "tipo", "origem", "codigo", "nome", "quantidade", "cliente", "usuario")
 HEADERS = {
     "data_hora": "Data/Hora",
     "tipo": "Tipo",
+    "origem": "Origem",
     "codigo": "Código",
     "nome": "Nome",
     "quantidade": "Qtd.",
@@ -12,7 +13,7 @@ HEADERS = {
     "usuario": "Usuário",
 }
 WIDTHS = {
-    "data_hora": 130, "tipo": 70, "codigo": 110, "nome": 200,
+    "data_hora": 130, "tipo": 70, "origem": 110, "codigo": 110, "nome": 200,
     "quantidade": 55, "cliente": 130, "usuario": 100,
 }
 
@@ -57,6 +58,7 @@ class ConfirmarExclusaoDialog(tk.Toplevel):
             tree.insert("", "end", values=(
                 m["data_hora"],
                 "Entrada" if m["tipo"] == "entrada" else "Saída",
+                m["origem_entrada"],
                 m["codigo_barras"],
                 m["nome"],
                 m["quantidade"],

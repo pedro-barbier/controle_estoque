@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
 from app import storage
-from app.ui.ui_utils import manter_foco
+from app.ui.ui_utils import ajustar_largura_pelo_conteudo, habilitar_busca_por_letra, manter_foco
 
 
 class EntradaEstoqueFrame(tk.Frame):
@@ -10,10 +10,14 @@ class EntradaEstoqueFrame(tk.Frame):
         super().__init__(parent)
         self.controller = controller
         self.pendentes = {}  # codigo_barras -> item (ver storage.descrever_item_estoque)
+        self.em_detalhes = False
 
         tk.Label(self, text="Registrar para Estoque (Entrada)", font=("TkDefaultFont", 16, "bold")).pack(pady=15)
 
-        barcode_frame = tk.Frame(self)
+        # --- Etapa 1: leitura dos produtos ---
+        self.scan_step = tk.Frame(self)
+
+        barcode_frame = tk.Frame(self.scan_step)
         barcode_frame.pack(pady=5)
         tk.Label(barcode_frame, text="Código de barras:").pack(side="left")
         self.barcode_var = tk.StringVar()
@@ -22,14 +26,14 @@ class EntradaEstoqueFrame(tk.Frame):
         self.barcode_entry.bind("<Return>", self.on_barcode_submit)
         manter_foco(
             self.barcode_entry,
-            condicao=lambda: self.controller.current_frame_name == "EntradaEstoqueFrame",
+            condicao=lambda: self.controller.current_frame_name == "EntradaEstoqueFrame" and not self.em_detalhes,
         )
 
-        self.status_label = tk.Label(self, text="", fg="red")
+        self.status_label = tk.Label(self.scan_step, text="", fg="red")
         self.status_label.pack()
 
         columns = ("codigo", "nome", "tipo", "quantidade")
-        self.tree = ttk.Treeview(self, columns=columns, show="headings", height=10)
+        self.tree = ttk.Treeview(self.scan_step, columns=columns, show="headings", height=10)
         self.tree.heading("codigo", text="Código")
         self.tree.heading("nome", text="Nome")
         self.tree.heading("tipo", text="Tipo")
@@ -42,27 +46,90 @@ class EntradaEstoqueFrame(tk.Frame):
         self.tree.bind("<Double-1>", self.on_tree_double_click)
 
         tk.Label(
-            self, text="Dica: dê duplo clique em um item para alterar a quantidade manualmente.",
+            self.scan_step, text="Dica: dê duplo clique em um item para alterar a quantidade manualmente.",
             fg="gray",
         ).pack()
 
-        btn_frame = tk.Frame(self)
+        btn_frame = tk.Frame(self.scan_step)
         btn_frame.pack(pady=10)
         tk.Button(btn_frame, text="Remover Selecionado", command=self.on_remove_selected).pack(side="left", padx=5)
         tk.Button(btn_frame, text="Cancelar Tudo", command=self.on_cancel_all).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="Finalizar e Adicionar ao Estoque", command=self.on_finalize).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Avançar", command=self.on_advance).pack(side="left", padx=5)
+
+        self.scan_step.pack(fill="both", expand=True)
+
+        # --- Etapa 2: origem da entrada ---
+        self.details_step = tk.Frame(self)
+
+        form = tk.Frame(self.details_step)
+        form.pack(pady=20)
+        tk.Label(form, text="Origem:").grid(row=0, column=0, sticky="e", pady=5)
+        self.origem_var = tk.StringVar()
+        self.origem_combo = ttk.Combobox(
+            form, textvariable=self.origem_var, state="readonly", width=33, values=storage.ORIGENS_ENTRADA,
+        )
+        self.origem_combo.grid(row=0, column=1, pady=5, sticky="w")
+        self.origem_combo.bind("<<ComboboxSelected>>", lambda e: self._atualizar_estado_cliente())
+        habilitar_busca_por_letra(self.origem_combo)
+
+        tk.Label(form, text="Cliente:").grid(row=1, column=0, sticky="e", pady=5)
+        self.cliente_var = tk.StringVar()
+        self.cliente_combo = ttk.Combobox(
+            form, textvariable=self.cliente_var, state="disabled", width=33, values=[],
+        )
+        self.cliente_combo.grid(row=1, column=1, pady=5, sticky="w")
+        habilitar_busca_por_letra(self.cliente_combo)
+
+        tk.Label(
+            self.details_step, text="O cliente só é informado quando a origem for Retorno ou Troca.", fg="gray",
+        ).pack()
+
+        btn_frame2 = tk.Frame(self.details_step)
+        btn_frame2.pack(pady=15)
+        tk.Button(btn_frame2, text="Confirmar Entrada", width=15, command=self.on_confirm_entry).pack(
+            side="left", padx=5,
+        )
+        tk.Button(btn_frame2, text="Voltar", width=15, command=self.on_back_to_scan).pack(side="left", padx=5)
 
         tk.Button(self, text="Voltar ao Menu", command=self.on_back_to_menu).pack(side="bottom", pady=15)
 
     def on_show(self):
         self.reset()
+        self.show_scan_step()
         self.barcode_entry.focus_set()
 
     def reset(self):
         self.pendentes = {}
         self.barcode_var.set("")
         self.status_label.config(text="", fg="red")
+        self._popular_clientes()
+        self.origem_var.set("")
+        self._atualizar_estado_cliente()
         self.refresh_tree()
+
+    def _popular_clientes(self):
+        clientes = sorted(storage.listar_clientes(), key=lambda c: (c["nome"].lower(), c["unidade"].lower()))
+        self.cliente_combo.config(values=[storage.nome_completo_cliente(c) for c in clientes])
+        ajustar_largura_pelo_conteudo(self.cliente_combo, minimo=33, maximo=55)
+
+    def _atualizar_estado_cliente(self):
+        """Cliente só faz sentido em Retorno/Troca; em Reabastecimento fica desabilitado e vazio."""
+        if self.origem_var.get() in storage.ORIGENS_COM_CLIENTE:
+            self.cliente_combo.config(state="readonly")
+        else:
+            self.cliente_var.set("")
+            self.cliente_combo.config(state="disabled")
+
+    def show_scan_step(self):
+        self.em_detalhes = False
+        self.details_step.pack_forget()
+        self.scan_step.pack(fill="both", expand=True)
+
+    def show_details_step(self):
+        self.em_detalhes = True
+        self.scan_step.pack_forget()
+        self.details_step.pack(fill="both", expand=True)
+        self.origem_combo.focus_set()
 
     def refresh_tree(self):
         self.tree.delete(*self.tree.get_children())
@@ -117,8 +184,10 @@ class EntradaEstoqueFrame(tk.Frame):
         self.barcode_entry.focus_set()
 
     def try_advance(self):
-        if self.pendentes:
-            self.on_finalize()
+        if self.em_detalhes:
+            self.on_confirm_entry()
+        elif self.pendentes:
+            self.on_advance()
 
     def on_remove_selected(self):
         selecionado = self.tree.selection()
@@ -140,14 +209,32 @@ class EntradaEstoqueFrame(tk.Frame):
             self.reset()
             self.barcode_entry.focus_set()
 
-    def on_finalize(self):
+    def on_advance(self):
         if not self.pendentes:
             messagebox.showwarning("Atenção", "Nenhum produto lido.")
             return
+        self.show_details_step()
+
+    def on_back_to_scan(self):
+        self.show_scan_step()
+        self.barcode_entry.focus_set()
+
+    def on_confirm_entry(self):
+        origem = self.origem_var.get().strip()
+        cliente = self.cliente_var.get().strip()
+        if origem not in storage.ORIGENS_ENTRADA:
+            messagebox.showwarning("Atenção", "Selecione a origem da entrada.")
+            return
+        if origem in storage.ORIGENS_COM_CLIENTE and not cliente:
+            messagebox.showwarning(
+                "Atenção", "Selecione o cliente. Cadastre clientes em 'Gerenciar Clientes' no menu principal.",
+            )
+            return
         itens = storage.expandir_itens_pendentes(self.pendentes)
-        storage.registrar_entrada(itens, self.controller.usuario_logado)
+        storage.registrar_entrada(itens, origem, cliente, self.controller.usuario_logado)
         messagebox.showinfo("Sucesso", "Produtos adicionados ao estoque.")
         self.reset()
+        self.show_scan_step()
         self.barcode_entry.focus_set()
 
     def on_back_to_menu(self):
@@ -156,4 +243,5 @@ class EntradaEstoqueFrame(tk.Frame):
         ):
             return
         self.reset()
+        self.show_scan_step()
         self.controller.show_frame("MainMenu")
